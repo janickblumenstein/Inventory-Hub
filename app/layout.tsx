@@ -6,7 +6,12 @@ export const metadata = {
   description: 'Inventar und Lagerplatz Verwaltung',
 }
 
-export default function RootLayout({ children }) {
+// HIER IST DIE LÖSUNG: Wir geben "children" einen festen Typ.
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode
+}) {
   return (
     <html lang="de">
       <body className="bg-slate-50 text-slate-900">
@@ -17,11 +22,12 @@ export default function RootLayout({ children }) {
               Werkstatt<span className="text-white">Hub</span>
             </Link>
             <div className="space-x-4 text-sm font-medium flex items-center">
-              <Link href="/scanner" className="text-orange-400 hover:text-orange-300 transition text-xl" title="Scanner">
+              {/* Dein neuer Scanner-Button */}
+              <Link href="/scanner" className="text-orange-400 hover:text-orange-300 transition text-2xl mr-2" title="Scanner">
                 📷
               </Link>
               <Link href="/" className="hover:text-orange-400 transition">Dashboard</Link>
-              <Link href="/new" className="bg-orange-600 hover:bg-orange-700 px-3 py-1.5 rounded-md transition">
+              <Link href="/new" className="bg-orange-600 hover:bg-orange-700 px-3 py-1.5 rounded-md transition text-white">
                 + Neu
               </Link>
             </div>

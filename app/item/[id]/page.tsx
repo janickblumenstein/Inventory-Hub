@@ -1,4 +1,3 @@
-// app/item/[id]/page.tsx
 "use client";
 
 import { useEffect, useState } from 'react';
@@ -10,8 +9,6 @@ export default function ItemDetail({ params }: any) {
   const [item, setItem] = useState<any>(null);
   const [location, setLocation] = useState<any>(null);
   const [loading, setLoading] = useState(true);
-  
-  // NEU: Status, falls wir gerade die Menge in der Datenbank aktualisieren
   const [isUpdating, setIsUpdating] = useState(false);
 
   useEffect(() => {
@@ -44,28 +41,19 @@ export default function ItemDetail({ params }: any) {
     fetchData();
   }, [params]);
 
-  // NEU: Funktion zum Ändern des Bestands
   const changeQuantity = async (amount: number) => {
     if (!item) return;
     
     const currentQty = Number(item.quantity) || 0;
     const newQty = currentQty + amount;
     
-    // Verhindere, dass der Bestand unter 0 fällt
     if (newQty < 0) return;
 
     setIsUpdating(true);
     try {
       const itemRef = doc(db, 'items', item.id);
-      
-      // 1. In Firebase speichern
-      await updateDoc(itemRef, {
-        quantity: newQty
-      });
-      
-      // 2. Ansicht sofort aktualisieren (ohne die Seite neu zu laden)
+      await updateDoc(itemRef, { quantity: newQty });
       setItem({ ...item, quantity: newQty });
-      
     } catch (error) {
       console.error("Fehler beim Update:", error);
       alert("Fehler beim Speichern der neuen Menge.");
@@ -74,6 +62,9 @@ export default function ItemDetail({ params }: any) {
     }
   };
 
+  // ==========================================
+  // HIER SIND DIE WICHTIGEN SCHUTZSCHALTER!
+  // ==========================================
   if (loading) return <div className="p-8 text-center text-slate-500 animate-pulse">Lade Daten aus der Werkstatt...</div>;
   if (!item) return <div className="p-8 text-center text-red-500">Item existiert nicht.</div>;
 
@@ -85,13 +76,21 @@ export default function ItemDetail({ params }: any) {
         </Link>
 
         <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
-          <div className="flex justify-between items-start mb-4">
+          
+          <div className="flex flex-col sm:flex-row justify-between items-start mb-4 gap-4">
             <h1 className="text-3xl font-bold text-slate-900 leading-tight">{item.name}</h1>
-            {item.ean && (
-               <span className="bg-slate-100 text-slate-500 text-xs px-2 py-1 rounded-md font-mono shrink-0 ml-4">
-                 EAN: {item.ean}
-               </span>
-            )}
+            
+            <div className="flex items-center gap-2">
+               {/* DER NEUE EDIT BUTTON */}
+               <Link href={`/item/${item.id}/edit`} className="bg-slate-100 hover:bg-slate-200 text-slate-600 p-2 rounded-lg transition text-sm" title="Bearbeiten">
+                  ✏️ Bearbeiten
+               </Link>
+               {item.ean && (
+                 <span className="bg-slate-100 text-slate-500 text-xs px-2 py-2 rounded-md font-mono shrink-0">
+                   EAN: {item.ean}
+                 </span>
+               )}
+            </div>
           </div>
           
           <div className="flex flex-wrap gap-2 mb-8">
@@ -100,7 +99,6 @@ export default function ItemDetail({ params }: any) {
             ))}
           </div>
 
-          {/* NEU: INTERAKTIVE BESTANDSSTEUERUNG */}
           <div className="bg-orange-50 border border-orange-100 rounded-xl p-6 flex flex-col sm:flex-row items-center justify-between gap-4 mb-8">
             <div>
               <p className="text-sm font-medium text-orange-800 mb-1">Aktueller Bestand</p>
@@ -132,7 +130,6 @@ export default function ItemDetail({ params }: any) {
             </div>
           </div>
 
-          {/* FOTO & MARKIERUNG ANZEIGEN */}
           <div className="border-t pt-6">
             <h3 className="text-lg font-semibold text-slate-800 mb-1">
               Lagerort: <span className="text-orange-600">{location ? location.name : 'Unbekannt'}</span>

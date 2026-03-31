@@ -247,30 +247,53 @@ export default function ItemDetail({ params }: { params: Promise<{ id: string }>
                   )}
                 </div>
 
-                {showLoanForm && (
-                  <form onSubmit={handleLendItem} className="p-4 bg-white border-b border-blue-50 space-y-3 animate-fade-in">
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                      <div className="sm:col-span-2">
-                        <label className="text-[10px] text-slate-500 uppercase font-bold">Wer bekommt es?</label>
-                        <input type="text" value={borrowerName} onChange={e => setBorrowerName(e.target.value)} placeholder="Name (z.B. Peter)" className="w-full p-2 border border-slate-300 rounded bg-slate-50 outline-none text-sm" required autoFocus />
-                      </div>
-                      {totalQty > 1 && (
-                        <div>
-                          <label className="text-[10px] text-slate-500 uppercase font-bold">Menge</label>
-                          <input type="number" min="1" max={availableQty} value={loanQty} onChange={e => setLoanQty(Number(e.target.value))} className="w-full p-2 border border-slate-300 rounded bg-slate-50 outline-none text-sm" required />
-                        </div>
-                      )}
-                    </div>
+                {/* Verleih-Formular */}
+            {/* Verleih-Formular */}
+            {showLoanForm && (
+              <form onSubmit={handleLendItem} className="p-4 bg-white border-b border-blue-50 space-y-3 animate-fade-in">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div className="sm:col-span-2">
+                    <label className="text-[10px] text-slate-500 uppercase font-bold">Wer bekommt es?</label>
+                    <input 
+                      type="text" 
+                      value={borrowerName} 
+                      onChange={e => setBorrowerName(e.target.value)} 
+                      placeholder="Name (z.B. Peter)" 
+                      className="w-full p-2 border border-slate-300 rounded-lg bg-white text-slate-900 placeholder-slate-400 outline-none text-sm font-medium focus:border-blue-500" 
+                      required 
+                      autoFocus 
+                    />
+                  </div>
+                  {totalQty > 1 && (
                     <div>
-                      <label className="text-[10px] text-slate-500 uppercase font-bold">Rückgabe erwartet am (Optional)</label>
-                      <input type="date" value={expectedReturn} onChange={e => setExpectedReturn(e.target.value)} className="w-full p-2 border border-slate-300 rounded bg-slate-50 outline-none text-sm" />
+                      <label className="text-[10px] text-slate-500 uppercase font-bold">Menge</label>
+                      <input 
+                        type="number" 
+                        min="1" 
+                        max={availableQty} 
+                        value={loanQty} 
+                        onChange={e => setLoanQty(Number(e.target.value))} 
+                        className="w-full p-2 border border-slate-300 rounded-lg bg-white text-slate-900 placeholder-slate-400 outline-none text-sm font-medium focus:border-blue-500" 
+                        required 
+                      />
                     </div>
-                    <div className="flex gap-2 pt-2">
-                      <button type="submit" disabled={isUpdating} className="flex-1 bg-blue-600 text-white text-sm font-bold py-2 rounded hover:bg-blue-700 transition">Jetzt verleihen</button>
-                      <button type="button" onClick={() => setShowLoanForm(false)} className="px-4 bg-slate-100 text-slate-600 text-sm font-bold rounded hover:bg-slate-200 transition">Abbrechen</button>
-                    </div>
-                  </form>
-                )}
+                  )}
+                </div>
+                <div>
+                  <label className="text-[10px] text-slate-500 uppercase font-bold">Rückgabe erwartet am (Optional)</label>
+                  <input 
+                    type="date" 
+                    value={expectedReturn} 
+                    onChange={e => setExpectedReturn(e.target.value)} 
+                    className="w-full p-2 border border-slate-300 rounded-lg bg-white text-slate-900 placeholder-slate-400 outline-none text-sm font-medium focus:border-blue-500" 
+                  />
+                </div>
+                <div className="flex gap-2 pt-2">
+                  <button type="submit" disabled={isUpdating} className="flex-1 bg-blue-600 text-white text-sm font-bold py-2 rounded-lg hover:bg-blue-700 transition shadow-sm">Jetzt verleihen</button>
+                  <button type="button" onClick={() => setShowLoanForm(false)} className="px-4 bg-slate-100 text-slate-600 text-sm font-bold rounded-lg hover:bg-slate-200 transition">Abbrechen</button>
+                </div>
+              </form>
+            )}
 
                 <div className="bg-white">
                   {activeLoans.length === 0 && !showLoanForm ? (

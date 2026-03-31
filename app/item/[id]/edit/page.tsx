@@ -6,26 +6,28 @@ import { doc, getDoc, updateDoc, deleteDoc, collection, getDocs } from 'firebase
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import TagSelector from '../../../../components/TagSelector';
+import type { CategoryConfig } from '../../../settings/page'; 
 
 export default function EditItem({ params }: { params: Promise<{ id: string }> }) {
   const router = useRouter();
   
-  // React 19 / Next.js 15 konformes Entpacken der Params
   const resolvedParams = use(params);
   const id = resolvedParams.id;
   
   const [name, setName] = useState('');
-  const [tags, setTags] = useState<string[]>([]);
+  const [ean, setEan] = useState('');
   const [quantity, setQuantity] = useState(1);
   const [locationId, setLocationId] = useState(''); 
   
-  // Koordinaten für den roten Punkt
+  // NEU: Das smarte Kategorie-System anstelle des alten TagSelectors
+  const [categories, setCategories] = useState<CategoryConfig[]>([]);
+  const [selectedCategoryId, setSelectedCategoryId] = useState<string>('');
+  const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  const [customTagInput, setCustomTagInput] = useState('');
+  const [attributes, setAttributes] = useState<Record<string, string>>({});
+  
   const [tagX, setTagX] = useState<number | null>(null);
   const [tagY, setTagY] = useState<number | null>(null);
-  
-  const [attributes, setAttributes] = useState<Record<string, string>>({});
-  const [learnedAttributes, setLearnedAttributes] = useState<Record<string, string[]>>({});
 
   const [showWarranty, setShowWarranty] = useState(false);
   const [price, setPrice] = useState('');
@@ -46,21 +48,13 @@ export default function EditItem({ params }: { params: Promise<{ id: string }> }
         locSnapshot.forEach((doc) => { locs.push({ id: doc.id, ...doc.data() }); });
         setLocations(locs);
 
-        // 2. Attribute für Autocomplete lernen
-        const itemSnapshot = await getDocs(collection(db, 'items'));
-        const learned: Record<string, Set<string>> = {};
-        itemSnapshot.forEach((doc) => {
-          const d = doc.data();
-          if (d.attributes) {
-            Object.entries(d.attributes).forEach(([k, v]) => {
-              if (!learned[k]) learned[k] = new Set();
-              if (v) learned[k].add(String(v));
-            });
-          }
-        });
-        const learnedFinal: Record<string, string[]> = {};
-        Object.keys(learned).forEach(k => { learnedFinal[k] = Array.from(learned[k]); });
-        setLearnedAttributes(learnedFinal);
+        // 2. Kategorien (Das "Gehirn") laden
+        const settingsSnap = await getDoc(doc(db, 'settings', 'main'));
+        let loadedCats: CategoryConfig[] = [];
+        if (settingsSnap.exists() && settingsSnap.data().categories) {
+          loadedCats = settingsSnap.data().categories;
+          setCategories(loadedCats);
+        }
 
         // 3. Dieses Item laden und Formular befüllen
         if (id) {
@@ -69,12 +63,19 @@ export default function EditItem({ params }: { params: Promise<{ id: string }> }
           if (itemSnap.exists()) {
             const data = itemSnap.data();
             setName(data.name || '');
-            setTags(data.tags || []);
+            setEan(data.ean || '');
             setQuantity(data.quantity || 1);
             setLocationId(data.locationId || '');
             setTagX(data.tagX ?? null);
             setTagY(data.tagY ?? null);
             setAttributes(data.attributes || {});
+            setSelectedTags(data.tags || []);
+            
+            // Die richtige Kategorie anhand des gespeicherten Namens finden
+            if (data.category) {
+              const matchedCat = loadedCats.find(c => c.name === data.category);
+              if (matchedCat) setSelectedCategoryId(matchedCat.id);
+            }
             
             setPrice(data.price || '');
             setPurchaseDate(data.purchaseDate || '');
@@ -94,7 +95,31 @@ export default function EditItem({ params }: { params: Promise<{ id: string }> }
     fetchData();
   }, [id]);
 
-  // Marker setzen
+  const handleCategorySelect = (cat: CategoryConfig) => {
+    setSelectedCategoryId(cat.id);
+    // Behält die Tags bei, wenn man sich verklickt hat, ansonsten leeren
+    // setSelectedTags([]); 
+    // setAttributes({});   
+    setCustomTagInput('');
+    if (cat.autoOpenWarranty) setShowWarranty(true);
+  };
+
+  const toggleTag = (tag: string) => {
+    setSelectedTags(prev => 
+      prev.includes(tag) ? prev.filter(t => t !== tag) : [...prev, tag]
+    );
+  };
+
+  const handleAddCustomTag = (e: React.KeyboardEvent | React.FocusEvent) => {
+    if ((e.type === 'keydown' && (e as React.KeyboardEvent).key !== 'Enter') || !customTagInput.trim()) return;
+    e.preventDefault();
+    const newTag = customTagInput.trim();
+    if (!selectedTags.includes(newTag)) {
+      setSelectedTags([...selectedTags, newTag]);
+    }
+    setCustomTagInput('');
+  };
+
   const handleImageClick = (e: React.MouseEvent<HTMLImageElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
     const x = ((e.clientX - rect.left) / rect.width) * 100;
@@ -103,26 +128,15 @@ export default function EditItem({ params }: { params: Promise<{ id: string }> }
     setTagY(y);
   };
 
-  const updateAttribute = (key: string, value: string) => {
-    setAttributes(prev => ({ ...prev, [key]: value }));
-  };
+  const activeCategory = categories.find(c => c.id === selectedCategoryId);
 
-  const renderAttributeInput = (label: string, key: string, placeholder: string, defaultOptions: string[] = []) => {
-    const learned = learnedAttributes[key] || [];
-    const combinedOptions = Array.from(new Set([...defaultOptions, ...learned])).sort();
-    const listId = `datalist-edit-${key}`;
-    return (
-      <div className="col-span-1">
-        <label className="text-xs text-slate-500 block mb-1">{label}</label>
-        <input type="text" list={listId} placeholder={placeholder} value={attributes[key] || ''} onChange={e => updateAttribute(key, e.target.value)} className="w-full p-2 border border-slate-300 rounded-md bg-white text-slate-900 text-sm outline-none" />
-        <datalist id={listId}>{combinedOptions.map(opt => <option key={opt} value={opt} />)}</datalist>
-      </div>
-    );
-  };
-
-  // ACHTUNG: Hier nutzen wir updateDoc statt addDoc!
   const handleSave = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    if (!activeCategory) {
+      alert("Bitte wähle eine Haupt-Kategorie aus!");
+      return;
+    }
+
     setIsSaving(true);
     try {
       let finalReceiptUrl = receiptUrl;
@@ -135,7 +149,9 @@ export default function EditItem({ params }: { params: Promise<{ id: string }> }
       const itemRef = doc(db, 'items', id);
       await updateDoc(itemRef, {
         name,
-        tags, 
+        ean,
+        category: activeCategory.name, 
+        tags: selectedTags, 
         quantity,
         locationId,
         tagX,
@@ -145,6 +161,28 @@ export default function EditItem({ params }: { params: Promise<{ id: string }> }
         purchaseDate: showWarranty ? purchaseDate : null,
         receiptUrl: showWarranty ? finalReceiptUrl : null
       });
+
+      // Die Selbstlern-Funktion (Ergänzt die Settings-Bibliothek auch beim Bearbeiten)
+      const newCustomTags = selectedTags.filter(t => !(activeCategory.tags || []).includes(t));
+      if (newCustomTags.length > 0) {
+        try {
+          const settingsRef = doc(db, 'settings', 'main');
+          const settingsSnap = await getDoc(settingsRef);
+          if (settingsSnap.exists()) {
+            const data = settingsSnap.data();
+            const updatedCategories = data.categories.map((c: any) => {
+              if (c.id === activeCategory.id) {
+                return { ...c, tags: [...(c.tags || []), ...newCustomTags] };
+              }
+              return c;
+            });
+            await updateDoc(settingsRef, { categories: updatedCategories });
+          }
+        } catch (settingsError) {
+          console.error("Fehler beim Erweitern der Tag-Bibliothek:", settingsError);
+        }
+      }
+
       router.push(`/item/${id}`); 
     } catch (error) {
       alert('Fehler beim Speichern.');
@@ -160,17 +198,14 @@ export default function EditItem({ params }: { params: Promise<{ id: string }> }
     }
   };
 
-  const hasScrewTag = tags.some(t => t.toLowerCase().includes('schraube') || t.toLowerCase().includes('befestigung'));
-  const hasMachineTag = tags.some(t => t.toLowerCase().includes('maschine') || t.toLowerCase().includes('säge') || t.toLowerCase().includes('schleifer') || t.toLowerCase().includes('akkuschrauber'));
   const selectedLoc = locations.find(l => l.id === locationId);
 
-  if (isLoading) return <div className="min-h-screen bg-slate-50 p-8 text-center text-slate-500">Lade Daten...</div>;
+  if (isLoading) return <div className="min-h-screen bg-slate-50 p-8 text-center text-slate-500 font-medium">Lade Daten...</div>;
 
   return (
-    <div className="min-h-screen bg-slate-50 p-4 md:p-8">
+    <div className="min-h-screen bg-slate-50 p-4 md:p-8 pb-32">
       <div className="max-w-xl mx-auto bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
         
-        {/* Header mit Icon-Buttons */}
         <div className="flex justify-between items-center mb-6">
           <h1 className="text-2xl font-bold text-slate-800">Item bearbeiten</h1>
           <div className="flex gap-3">
@@ -181,27 +216,120 @@ export default function EditItem({ params }: { params: Promise<{ id: string }> }
         
         <form onSubmit={handleSave} className="space-y-6">
           <div className="space-y-4">
+            
             <div>
-              <label className="block text-sm font-medium text-slate-700 mb-1">Bezeichnung</label>
-              <input type="text" value={name} onChange={(e) => setName(e.target.value)} className="w-full p-3 border border-slate-300 rounded-xl bg-white text-slate-900 outline-none font-bold text-lg" required />
+              <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Bezeichnung</label>
+              <input type="text" value={name} onChange={(e) => setName(e.target.value)} className="w-full p-3 border border-slate-300 rounded-xl bg-white text-slate-900 outline-none font-bold text-lg focus:border-orange-500 transition" required />
             </div>
 
-            <div>
-              <label className="block text-sm font-medium text-slate-700 mb-2">Tags / Kategorien</label>
-              <TagSelector selectedTags={tags} onTagsChange={setTags} />
+            {/* DYNAMISCHE KATEGORIE-AUSWAHL */}
+            <div className="pt-2">
+              <label className="block text-[10px] font-bold text-slate-500 uppercase mb-2">Haupt-Kategorie wählen</label>
+              <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+                {categories.map(cat => {
+                  const isSelected = selectedCategoryId === cat.id;
+                  return (
+                    <button
+                      key={cat.id}
+                      type="button"
+                      onClick={() => handleCategorySelect(cat)}
+                      className={`p-3 rounded-xl border flex flex-col items-center gap-1.5 transition-all ${
+                        isSelected 
+                          ? 'bg-orange-50 border-orange-500 shadow-sm transform scale-[1.02]' 
+                          : 'bg-white border-slate-200 opacity-70 hover:opacity-100 hover:bg-slate-50'
+                      }`}
+                    >
+                      <span className="text-2xl">{cat.icon}</span>
+                      <span className={`text-[9px] font-bold text-center leading-tight ${isSelected ? 'text-orange-900' : 'text-slate-600'}`}>
+                        {cat.name}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
+            {/* DYNAMISCHE TAG-BIBLIOTHEK + CUSTOM TAGS */}
+            {activeCategory && (
+              <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl animate-fade-in">
+                <label className="block text-[10px] font-bold text-slate-500 uppercase mb-2">Spezifischer Typ</label>
+                <div className="flex flex-wrap gap-2 items-center">
+                  
+                  {activeCategory.tags?.map(tag => {
+                    const isSelected = selectedTags.includes(tag);
+                    return (
+                      <button
+                        key={tag}
+                        type="button"
+                        onClick={() => toggleTag(tag)}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors border ${
+                          isSelected 
+                            ? 'bg-orange-500 text-white border-orange-600 shadow-sm' 
+                            : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
+                        }`}
+                      >
+                        {isSelected ? '✓ ' : ''}{tag}
+                      </button>
+                    );
+                  })}
+
+                  {selectedTags.filter(t => !activeCategory.tags?.includes(t)).map(customTag => (
+                    <button
+                      key={customTag}
+                      type="button"
+                      onClick={() => toggleTag(customTag)}
+                      className="px-3 py-1.5 rounded-lg text-xs font-bold bg-orange-500 text-white border border-orange-600 shadow-sm"
+                    >
+                      ✓ {customTag}
+                    </button>
+                  ))}
+
+                  <input 
+                    type="text" 
+                    value={customTagInput}
+                    onChange={(e) => setCustomTagInput(e.target.value)}
+                    onKeyDown={handleAddCustomTag}
+                    onBlur={handleAddCustomTag}
+                    placeholder="+ Eigenes Tag"
+                    className="px-3 py-1.5 rounded-lg text-xs font-bold border border-slate-300 bg-white text-slate-900 placeholder-slate-400 outline-none w-32 focus:border-orange-500"
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* DYNAMISCHE ATTRIBUTE */}
+            {activeCategory && activeCategory.attributes && activeCategory.attributes.length > 0 && (
+              <div className="p-4 bg-purple-50 border border-purple-100 rounded-xl animate-fade-in">
+                <label className="block text-[10px] font-bold text-purple-800 uppercase mb-3 flex items-center gap-1">
+                  <span>⚙️</span> Spezifische Daten erfassen
+                </label>
+                <div className="grid grid-cols-2 gap-3">
+                  {activeCategory.attributes.map(attr => (
+                    <div key={attr}>
+                      <label className="block text-[10px] font-semibold text-purple-700 mb-1">{attr}</label>
+                      <input 
+                        type="text" 
+                        value={attributes[attr] || ''} 
+                        onChange={(e) => setAttributes({...attributes, [attr]: e.target.value})} 
+                        className="w-full p-2.5 bg-white border border-purple-200 rounded-lg text-sm outline-none focus:border-purple-500 text-slate-900 shadow-sm"
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div className="grid grid-cols-2 gap-4 pt-4 border-t border-slate-100 mt-4">
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Menge</label>
-                <input type="number" value={quantity} onChange={(e) => setQuantity(Number(e.target.value))} className="w-full p-3 border border-slate-300 rounded-xl bg-white text-slate-900" />
+                <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Menge</label>
+                <input type="number" value={quantity} onChange={(e) => setQuantity(Number(e.target.value))} className="w-full p-3 border border-slate-300 rounded-xl bg-white text-slate-900 font-bold" />
               </div>
               <div>
-                <label className="block text-sm font-medium text-slate-700 mb-1">Lagerort</label>
+                <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Lagerort</label>
                 <select 
                   value={locationId} 
                   onChange={(e) => { setLocationId(e.target.value); setTagX(null); setTagY(null); }} 
-                  className="w-full p-3 border border-slate-300 rounded-xl bg-white text-slate-900"
+                  className="w-full p-3 border border-slate-300 rounded-xl bg-white text-slate-900 font-medium"
                 >
                   <option value="">-- Ort wählen --</option>
                   {(() => {
@@ -224,10 +352,9 @@ export default function EditItem({ params }: { params: Promise<{ id: string }> }
               </div>
             </div>
 
-            {/* Bild des Lagerorts mit Klick-Marker */}
             {selectedLoc && selectedLoc.imageUrl && (
               <div className="mt-4 p-4 bg-slate-50 border border-slate-200 rounded-xl animate-fade-in">
-                <p className="text-xs text-slate-500 mb-2 uppercase font-bold tracking-wider">Position im Regal (Klicken zum Ändern)</p>
+                <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">Position im Regal (Klicken zum Ändern)</p>
                 <div className="relative inline-block border-2 border-slate-300 rounded-lg overflow-hidden shadow-sm w-full">
                   <img 
                     src={selectedLoc.imageUrl} 
@@ -246,27 +373,7 @@ export default function EditItem({ params }: { params: Promise<{ id: string }> }
             )}
           </div>
 
-          {/* SMARTE ATTRIBUTE */}
-          {(hasScrewTag || hasMachineTag) && (
-            <div className="border border-slate-200 rounded-xl p-4 bg-slate-50/50 animate-fade-in">
-              <label className="block text-sm font-medium text-slate-700 mb-4">Spezifische Attribute</label>
-              
-              {hasScrewTag && (
-                <div className="grid grid-cols-2 gap-3 mb-3">
-                  {renderAttributeInput('Länge (mm)', 'Länge (mm)', '40')}
-                  {renderAttributeInput('Durchmesser', 'Durchmesser', '4')}
-                </div>
-              )}
-              {hasMachineTag && (
-                <div className="grid grid-cols-2 gap-3">
-                  {renderAttributeInput('Leistung', 'Leistung', '18V')}
-                  {renderAttributeInput('Energiequelle', 'Energiequelle', 'Akku', ['Akku', 'Netz'])}
-                </div>
-              )}
-            </div>
-          )}
-
-          <div className="flex items-center gap-2 px-1 border-t pt-4">
+          <div className="flex items-center gap-2 px-1 border-t pt-6 mt-6">
             <input type="checkbox" id="toggleEditWarranty" checked={showWarranty} onChange={(e) => setShowWarranty(e.target.checked)} className="w-5 h-5 rounded border-slate-300 text-orange-600 focus:ring-orange-500" />
             <label htmlFor="toggleEditWarranty" className="text-sm font-semibold text-slate-700 cursor-pointer">🧾 Garantie & Beleg verwalten</label>
           </div>
@@ -275,24 +382,24 @@ export default function EditItem({ params }: { params: Promise<{ id: string }> }
             <div className="bg-orange-50 p-4 rounded-xl border border-orange-200 space-y-4 animate-fade-in">
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="text-[10px] text-slate-500 uppercase">Preis</label>
-                  <input type="number" step="0.05" value={price} onChange={(e) => setPrice(e.target.value)} className="w-full p-2 border border-slate-300 rounded-lg bg-white text-slate-900" />
+                  <label className="block text-[10px] font-bold text-orange-800 uppercase mb-1">Preis (CHF)</label>
+                  <input type="number" step="0.05" value={price} onChange={(e) => setPrice(e.target.value)} className="w-full p-2.5 border border-orange-200 rounded-lg bg-white text-slate-900 outline-none focus:border-orange-500" />
                 </div>
                 <div>
-                  <label className="text-[10px] text-slate-500 uppercase">Kaufdatum</label>
-                  <input type="date" value={purchaseDate} onChange={(e) => setPurchaseDate(e.target.value)} className="w-full p-2 border border-slate-300 rounded-lg bg-white text-slate-900" />
+                  <label className="block text-[10px] font-bold text-orange-800 uppercase mb-1">Kaufdatum</label>
+                  <input type="date" value={purchaseDate} onChange={(e) => setPurchaseDate(e.target.value)} className="w-full p-2.5 border border-orange-200 rounded-lg bg-white text-slate-900 outline-none focus:border-orange-500" />
                 </div>
               </div>
               <div>
-                <label className="text-[10px] text-slate-500 uppercase block mb-1">Neuer Kassenbeleg</label>
-                <input type="file" accept="image/*" capture="environment" onChange={(e) => e.target.files && setReceiptFile(e.target.files[0])} className="text-xs text-slate-500" />
-                {receiptUrl && <p className="text-[10px] text-green-600 mt-1">✓ Beleg bereits gespeichert</p>}
+                <label className="block text-[10px] font-bold text-orange-800 uppercase block mb-1">Neuer Kassenbeleg</label>
+                <input type="file" accept="image/*" capture="environment" onChange={(e) => e.target.files && setReceiptFile(e.target.files[0])} className="text-xs text-slate-600 w-full p-2 bg-white rounded-lg border border-orange-200" />
+                {receiptUrl && <p className="text-[10px] text-green-600 mt-1 font-bold">✓ Beleg bereits gespeichert</p>}
               </div>
             </div>
           )}
 
           <div className="pt-6">
-            <button type="submit" disabled={isSaving} className="w-full bg-orange-600 text-white font-bold py-4 rounded-xl shadow-lg shadow-orange-200 disabled:opacity-50 transition">
+            <button type="submit" disabled={isSaving || !activeCategory} className="w-full bg-slate-900 text-white font-bold py-4 rounded-xl shadow-lg shadow-slate-200 disabled:opacity-50 transition hover:bg-slate-800 text-lg">
               {isSaving ? 'Speichert...' : 'Änderungen speichern'}
             </button>
           </div>

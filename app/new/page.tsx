@@ -280,7 +280,7 @@ function NewItemForm() {
                     onKeyDown={handleAddCustomTag}
                     onBlur={handleAddCustomTag}
                     placeholder="+ Eigenes Tag"
-                    className="px-3 py-1.5 rounded-lg text-xs font-medium border border-slate-300 bg-white outline-none w-32 focus:border-orange-500"
+                    className="px-3 py-1.5 rounded-lg text-xs font-bold border border-slate-300 bg-white text-slate-900 placeholder-slate-400 outline-none w-32 focus:border-orange-500"
                   />
                 </div>
               </div>

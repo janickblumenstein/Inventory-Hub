@@ -35,16 +35,22 @@ export default function Scanner() {
           setStatusMessage("Prüfe Datenbank...");
 
           try {
-            const locRef = doc(db, 'locations', decodedText);
-            const locSnap = await getDoc(locRef);
-            if (locSnap.exists()) {
+            // 1. Prüfen, ob der Code ein LAGERORT ist (Sucht nach dem Feld 'code', z.B. LOC-X7B9)
+            const locQuery = query(collection(db, 'locations'), where('code', '==', decodedText));
+            const locSnap = await getDocs(locQuery);
+            
+            if (!locSnap.empty) {
               setStatusMessage("Lagerort gefunden!");
-              router.push(`/?location=${decodedText}`); 
+              const locId = locSnap.docs[0].id;
+              // Wir leiten zum Dashboard weiter und übergeben die ID als Parameter
+              router.push(`/?scannedLoc=${locId}`); 
               return;
             }
 
-            const q = query(collection(db, 'items'), where('ean', '==', decodedText));
-            const querySnapshot = await getDocs(q);
+            // 2. Prüfen, ob der Code ein ITEM-BARCODE (EAN) ist
+            const itemQ = query(collection(db, 'items'), where('ean', '==', decodedText));
+            const querySnapshot = await getDocs(itemQ);
+            
             if (!querySnapshot.empty) {
               setStatusMessage("Item gefunden!");
               const existingItem = querySnapshot.docs[0];
@@ -52,6 +58,7 @@ export default function Scanner() {
               return;
             }
 
+            // 3. Nichts gefunden -> Neues Item
             setStatusMessage("Unbekannter Barcode.");
             setIsProcessing(false);
 

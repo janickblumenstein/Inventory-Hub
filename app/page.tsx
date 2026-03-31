@@ -19,6 +19,7 @@ export default function Dashboard() {
   const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(new Set());
   const [bulkLocationId, setBulkLocationId] = useState('');
   const [isBulkUpdating, setIsBulkUpdating] = useState(false);
+  const [scannedLocationFilter, setScannedLocationFilter] = useState<string | null>(null);
 
   const fetchData = async () => {
     setLoading(true);
@@ -49,7 +50,17 @@ export default function Dashboard() {
     }
   };
 
-  useEffect(() => { fetchData(); }, []);
+  useEffect(() => { 
+    fetchData(); 
+    
+    // Prüfen, ob wir vom Scanner kommen
+    const params = new URLSearchParams(window.location.search);
+    const scannedLoc = params.get('scannedLoc');
+    if (scannedLoc) {
+      setScannedLocationFilter(scannedLoc);
+      setGroupBy('location'); // Automatisch auf die "Ort"-Gruppierung wechseln
+    }
+  }, []);
 
   const availableTags = useMemo(() => {
     const tags = new Set<string>();
@@ -84,8 +95,14 @@ export default function Dashboard() {
     return buildPath(loc);
   };
 
-  const filteredItems = useMemo(() => {
+const filteredItems = useMemo(() => {
     return items.filter(item => {
+      // 1. NEU: Wenn vom Scanner ein Ort gefiltert wird, schließe alles andere aus!
+      if (scannedLocationFilter && item.locationId !== scannedLocationFilter) {
+        return false;
+      }
+
+      // 2. Normale Text- und Tag-Suche
       const matchesSearch = searchTerm === "" || 
         item.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         item.tags?.some((tag: string) => tag.toLowerCase().includes(searchTerm.toLowerCase()));
@@ -93,7 +110,7 @@ export default function Dashboard() {
         selectedFilterTags.every(filterTag => item.tags?.includes(filterTag));
       return matchesSearch && matchesChips;
     });
-  }, [items, searchTerm, selectedFilterTags]);
+  }, [items, searchTerm, selectedFilterTags, scannedLocationFilter]); // Wichtig: State hier ergänzen!
 
   const groupedItems = useMemo(() => {
     if (groupBy === 'none') return { 'Alle Items': filteredItems };
@@ -220,6 +237,24 @@ export default function Dashboard() {
 
       <main className="max-w-5xl mx-auto p-4 md:p-8 mt-4 relative">
         
+            {/* NEU: Scanner-Filter Hinweis */}
+        {scannedLocationFilter && (
+          <div className="bg-orange-100 border border-orange-200 text-orange-900 p-4 rounded-xl flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-6 shadow-sm animate-fade-in">
+            <span className="text-sm font-bold flex items-center gap-2">
+              📷 Scanner aktiv: Zeige nur Inhalt dieses Lagerorts
+            </span>
+            <button 
+              onClick={() => {
+                setScannedLocationFilter(null);
+                window.history.replaceState({}, '', '/'); // Bereinigt die URL
+              }}
+              className="bg-white px-4 py-2 rounded-lg text-xs font-bold shadow-sm hover:bg-orange-50 transition border border-orange-200"
+            >
+              ✖ Filter aufheben
+            </button>
+          </div>
+        )}
+
         {/* SUCHE & FILTER */}
         <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 mb-6">
           <input type="text" placeholder="🔍 Suchen..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg text-slate-900 outline-none focus:ring-2 focus:ring-orange-500 mb-4" />

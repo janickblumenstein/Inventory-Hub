@@ -57,29 +57,22 @@ export default function ItemDetail({ params }: { params: Promise<{ id: string }>
     fetchItemAndLoans();
   }, [id]);
 
-// NEU: Bring!-optimiertes Teilen
+// NEU: Bring! optimierter Clipboard-Hack
   const handleShareToShoppingList = async () => {
     if (!item) return;
     
     // Bring! Magic Format: "Menge x Name" (z.B. "5x Torx 40mm")
-    // Bring erkennt das 'x' automatisch und splittet es in Menge und Artikel.
-    // Wir lassen URLs und Sonderzeichen weg, damit Bring nicht verwirrt wird.
     const bringFriendlyText = `${item.quantity}x ${item.name}`;
 
-    if (navigator.share) {
-      try {
-        await navigator.share({
-          // Der Title wird von vielen Apps ignoriert, ist aber Good Practice
-          title: 'Nachkaufen', 
-          // Der Text ist exakt das, was in der Einkaufsliste landet
-          text: bringFriendlyText, 
-        });
-      } catch (error) {
-        console.log('Teilen abgebrochen oder fehlgeschlagen', error);
-      }
-    } else {
-      navigator.clipboard.writeText(bringFriendlyText);
-      alert(`"${bringFriendlyText}" wurde in die Zwischenablage kopiert.`);
+    try {
+      // Wir zwingen es direkt in die Zwischenablage
+      await navigator.clipboard.writeText(bringFriendlyText);
+      
+      // Visuelles Feedback + Anleitung für den User
+      alert(`✅ Kopiert: "${bringFriendlyText}"\n\nÖffne jetzt einfach deine Bring! App. Sie wird den Text erkennen und dich fragen, ob du ihn einfügen möchtest.`);
+      
+    } catch (error) {
+      alert("Kopieren fehlgeschlagen. Bitte manuell eintragen.");
     }
   };
 

@@ -58,7 +58,25 @@ export default function Scanner() {
               return;
             }
 
-            // 3. Nichts gefunden -> Neues Item
+            // 3. Nichts gefunden -> Wir fragen das globale Internet!
+            setStatusMessage("Suche im globalen Netz...");
+            try {
+              // Wir nutzen die freie UPCitemdb API (Limit: ~100 Anfragen/Tag)
+              const res = await fetch(`https://api.upcitemdb.com/prod/trial/lookup?upc=${decodedText}`);
+              const data = await res.json();
+              
+              if (data && data.items && data.items.length > 0) {
+                const globalName = data.items[0].title;
+                setStatusMessage(`Gefunden: ${globalName.substring(0, 20)}...`);
+                // Leitet weiter und füllt den Namen schon automatisch aus!
+                router.push(`/new?ean=${decodedText}&name=${encodeURIComponent(globalName)}`);
+                return;
+              }
+            } catch (e) {
+              console.log("Globale API nicht erreichbar oder Item unbekannt.");
+            }
+
+            // 4. Absolut nichts gefunden -> Leeres neues Item
             setStatusMessage("Unbekannter Barcode.");
             setIsProcessing(false);
 

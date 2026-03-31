@@ -106,7 +106,8 @@ export default function ItemDetail({ params }: { params: Promise<{ id: string }>
 
     setIsUpdating(true);
     try {
-      await addDoc(collection(db, 'loans'), {
+      // 1. Wir speichern die Daten zuerst in einer Variable
+      const newLoanData = {
         itemId: item.id,
         itemName: item.name,
         borrowerName: borrowerName.trim(),
@@ -114,13 +115,26 @@ export default function ItemDetail({ params }: { params: Promise<{ id: string }>
         borrowDate: new Date().toISOString(),
         expectedReturnDate: expectedReturn || null,
         status: 'active'
-      });
+      };
+
+      // 2. In Firebase speichern
+      const docRef = await addDoc(collection(db, 'loans'), newLoanData);
       
       setBorrowerName('');
       setLoanQty(1);
       setExpectedReturn('');
       setShowLoanForm(false);
-      fetchItemAndLoans();
+      fetchItemAndLoans(); // Liste aktualisieren
+
+      // 3. NEU: Der automatische Druck-Dialog!
+      // Wir warten kurz (300ms), damit das Menü sich weich schließt, bevor das Pop-up kommt
+      setTimeout(() => {
+        if (window.confirm(`Erfolgreich an ${newLoanData.borrowerName} verliehen!\n\n🖨️ Möchtest du jetzt direkt das Verleih-Etikett für den Koffer drucken?`)) {
+          // Wir übergeben die Daten direkt an den Drucker
+          handlePrintLoan({ id: docRef.id, ...newLoanData });
+        }
+      }, 300);
+
     } catch (error) {
       alert("Fehler beim Verleihen.");
     } finally {

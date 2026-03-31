@@ -2,13 +2,14 @@
 
 import { useEffect, useState, useMemo } from 'react';
 import { db } from '../lib/firebase';
-import { collection, getDocs, orderBy, query, writeBatch, doc } from 'firebase/firestore';
+import { collection, getDocs, orderBy, query, writeBatch, doc,getDoc } from 'firebase/firestore';
 import Link from 'next/link';
 
 export default function Dashboard() {
   const [items, setItems] = useState<any[]>([]);
   const [locations, setLocations] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [categories, setCategories] = useState<any[]>([]);
   
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedFilterTags, setSelectedFilterTags] = useState<string[]>([]);
@@ -27,6 +28,10 @@ export default function Dashboard() {
       const locSnap = await getDocs(collection(db, 'locations'));
       const locList = locSnap.docs.map(d => ({ id: d.id, ...d.data() }));
       setLocations(locList);
+      const settingsSnap = await getDoc(doc(db, 'settings', 'main'));
+      if (settingsSnap.exists() && settingsSnap.data().categories) {
+        setCategories(settingsSnap.data().categories);
+      }
 
       const itemsQuery = query(collection(db, 'items'), orderBy('createdAt', 'desc'));
       const itemsSnap = await getDocs(itemsQuery);
@@ -323,10 +328,14 @@ const filteredItems = useMemo(() => {
                 
                 {/* AKKORDEON HEADER */}
                 <div className="w-full flex justify-between items-center bg-slate-50/50 hover:bg-slate-100 transition border-b border-slate-100">
-                  <button onClick={() => toggleGroup(groupName)} className="flex-1 flex items-center gap-3 p-4 text-left">
+                  <button onClick={() => toggleGroup(groupName)} className="flex-1 flex items-center gap-3 p-4 text-left hover:bg-slate-50 transition-colors">
                     <span className="text-slate-400 font-mono text-xl leading-none w-4">{expandedGroups[groupName] ? '−' : '+'}</span>
                     <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2 flex-wrap">
-                      {groupName} 
+                      {/* NEU: Das Icon wird live aus deinen Settings gezogen! */}
+                      {groupBy === 'category' && (
+                        <span className="text-xl mr-1">{categories.find(c => c.name === groupName)?.icon || '🏷️'}</span>
+                      )}
+                      {groupName}
                       {/* Zeigt den Code des Lagerorts dezent an */}
                       {groupBy === 'location' && locations.find(l => l.name === groupName)?.code && (
                         <span className="text-xs font-mono text-slate-400 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">

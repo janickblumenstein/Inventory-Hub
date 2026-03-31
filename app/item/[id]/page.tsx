@@ -57,26 +57,29 @@ export default function ItemDetail({ params }: { params: Promise<{ id: string }>
     fetchItemAndLoans();
   }, [id]);
 
-  // NEU: Nachricht an Einkaufs-Apps/Messenger teilen
+// NEU: Bring!-optimiertes Teilen
   const handleShareToShoppingList = async () => {
     if (!item) return;
     
-    // Wir bauen einen sauberen Text zusammen
-    const shareText = `🛒 ShedSync Nachbestellung:\n- ${item.name}\n- Menge: ${item.quantity}x\n- Ort: ${location?.name || 'Unbekannt'}\n\nLink: ${window.location.href}`;
+    // Bring! Magic Format: "Menge x Name" (z.B. "5x Torx 40mm")
+    // Bring erkennt das 'x' automatisch und splittet es in Menge und Artikel.
+    // Wir lassen URLs und Sonderzeichen weg, damit Bring nicht verwirrt wird.
+    const bringFriendlyText = `${item.quantity}x ${item.name}`;
 
     if (navigator.share) {
       try {
         await navigator.share({
-          title: 'ShedSync Einkauf',
-          text: shareText,
+          // Der Title wird von vielen Apps ignoriert, ist aber Good Practice
+          title: 'Nachkaufen', 
+          // Der Text ist exakt das, was in der Einkaufsliste landet
+          text: bringFriendlyText, 
         });
       } catch (error) {
         console.log('Teilen abgebrochen oder fehlgeschlagen', error);
       }
     } else {
-      // Fallback für Browser, die kein Sharing unterstützen (z.B. Desktop)
-      navigator.clipboard.writeText(shareText);
-      alert("Text wurde in die Zwischenablage kopiert, da dein Browser das direkte Teilen nicht unterstützt.");
+      navigator.clipboard.writeText(bringFriendlyText);
+      alert(`"${bringFriendlyText}" wurde in die Zwischenablage kopiert.`);
     }
   };
 

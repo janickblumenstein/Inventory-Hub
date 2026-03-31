@@ -5,9 +5,11 @@ import { db, storage } from '../../lib/firebase';
 import { collection, addDoc, getDocs, doc, deleteDoc, query, orderBy, updateDoc } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import Link from 'next/link';
+import QRCode from 'react-qr-code'; // NEU: Der QR-Generator
 
 export default function LocationsManager() {
-  const [locations, setLocations] = useState<any[]>([]);
+  const [printLoc, setPrintLoc] = useState<any>(null); // NEU: Welcher Ort wird gerade gedruckt?
+    const [locations, setLocations] = useState<any[]>([]);
   const [newName, setNewName] = useState('');
   const [parentLocId, setParentLocId] = useState('');
   
@@ -89,19 +91,27 @@ export default function LocationsManager() {
     }
   };
 
-  const handleDelete = async (id: string) => {
+const handleDelete = async (id: string) => {
     if (confirm("Lagerort wirklich löschen?")) {
       await deleteDoc(doc(db, 'locations', id));
       fetchLocations();
     }
   };
 
+  // NEU: Bereitet den Code vor und öffnet den Browser-Druckdialog
+  const handlePrint = (loc: any) => {
+    setPrintLoc(loc);
+    setTimeout(() => { window.print(); }, 200); // 200ms warten, damit das SVG rendern kann
+  };
+
   if (loading) return <div className="p-8 text-center text-slate-500">Lade Struktur...</div>;
 
   const hierarchicalLocs = getHierarchicalLocations();
 
-  return (
-    <div className="min-h-screen bg-slate-50 p-4 md:p-8">
+return (
+    <>
+    {/* print:hidden blendet die App aus, wenn der Druckdialog öffnet */}
+    <div className="min-h-screen bg-slate-50 p-4 md:p-8 print:hidden">
       <div className="max-w-2xl mx-auto">
         <div className="flex justify-between items-center mb-8">
           <h1 className="text-2xl font-bold text-slate-800">Lagerorte</h1>
@@ -172,11 +182,27 @@ export default function LocationsManager() {
                 </div>
               </div>
 
-              <button onClick={() => handleDelete(loc.id)} className="text-slate-300 hover:text-red-500 p-2">🗑️</button>
+              <div className="flex gap-1">
+                <button onClick={() => handlePrint(loc)} className="text-slate-400 hover:text-slate-800 p-2 transition" title="Etikett drucken">🖨️</button>
+                <button onClick={() => handleDelete(loc.id)} className="text-slate-300 hover:text-red-500 p-2 transition" title="Löschen">🗑️</button>
+              </div>
             </div>
           ))}
-        </div>
+</div>
       </div>
     </div>
+
+    {/* NEU: Das Etiketten-Layout (Auf dem Bildschirm unsichtbar, auf Papier zentriert) */}
+    <div className="hidden print:flex fixed inset-0 bg-white items-center justify-center">
+      {printLoc && (
+        <div className="text-center flex flex-col items-center justify-center" style={{ width: '62mm', height: '29mm' }}>
+          {/* Optimiert für typische Etikettenmaße */}
+          <QRCode value={printLoc.code} size={64} level="M" />
+          <p className="mt-1 text-sm font-bold uppercase tracking-widest text-black leading-none whitespace-nowrap overflow-hidden text-ellipsis w-full px-1">{printLoc.name}</p>
+          <p className="text-[10px] font-mono text-black mt-0.5 leading-none">{printLoc.code}</p>
+        </div>
+      )}
+    </div>
+    </>
   );
 }

@@ -57,6 +57,30 @@ export default function ItemDetail({ params }: { params: Promise<{ id: string }>
     fetchItemAndLoans();
   }, [id]);
 
+  // NEU: Nachricht an Einkaufs-Apps/Messenger teilen
+  const handleShareToShoppingList = async () => {
+    if (!item) return;
+    
+    // Wir bauen einen sauberen Text zusammen
+    const shareText = `🛒 ShedSync Nachbestellung:\n- ${item.name}\n- Menge: ${item.quantity}x\n- Ort: ${location?.name || 'Unbekannt'}\n\nLink: ${window.location.href}`;
+
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: 'ShedSync Einkauf',
+          text: shareText,
+        });
+      } catch (error) {
+        console.log('Teilen abgebrochen oder fehlgeschlagen', error);
+      }
+    } else {
+      // Fallback für Browser, die kein Sharing unterstützen (z.B. Desktop)
+      navigator.clipboard.writeText(shareText);
+      alert("Text wurde in die Zwischenablage kopiert, da dein Browser das direkte Teilen nicht unterstützt.");
+    }
+  };
+
+
   const changeQuantity = async (amount: number) => {
     if (!item) return;
     const currentQty = Number(item.quantity) || 0;
@@ -156,15 +180,19 @@ export default function ItemDetail({ params }: { params: Promise<{ id: string }>
 
         <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
           
-          {/* HEADER */}
-          <div className="flex flex-col sm:flex-row justify-between items-start mb-4 gap-4">
-            <h1 className="text-3xl font-bold text-slate-900 leading-tight">{item.name}</h1>
-            <div className="flex items-center gap-2">
-               <Link href={`/item/${item.id}/edit`} className="bg-slate-100 hover:bg-slate-200 text-slate-600 px-3 py-2 rounded-lg transition text-sm font-medium">
-                  ✏️ Bearbeiten
-               </Link>
-            </div>
-          </div>
+<div className="flex items-center gap-2">
+   {/* NEU: Einkaufs-Button */}
+   <button 
+     onClick={handleShareToShoppingList}
+     className="bg-orange-100 hover:bg-orange-200 text-orange-700 px-3 py-2 rounded-lg transition text-sm font-bold flex items-center gap-2"
+     title="Auf Einkaufsliste setzen"
+   >
+      🛒 <span className="hidden sm:inline">Einkauf</span>
+   </button>
+   <Link href={`/item/${item.id}/edit`} className="bg-slate-100 hover:bg-slate-200 text-slate-600 px-3 py-2 rounded-lg transition text-sm font-medium">
+      ✏️ Bearbeiten
+   </Link>
+</div>
           
           <div className="flex flex-wrap gap-2 mb-8">
             {item.tags?.map((tag: string, i: number) => (

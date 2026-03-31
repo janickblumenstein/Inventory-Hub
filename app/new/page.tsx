@@ -4,14 +4,19 @@ import { useState, useEffect } from 'react';
 import { db, storage } from '../../lib/firebase';
 import { collection, addDoc, getDocs } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation'; // <-- useSearchParams hinzufügen
 import Link from 'next/link';
 import TagSelector from '../../components/TagSelector'; 
 
 export default function NewItem() {
   const router = useRouter();
   
-  const [name, setName] = useState('');
+const searchParams = useSearchParams();
+  const scannedEan = searchParams?.get('ean') || '';
+  const scannedName = searchParams?.get('name') || '';
+
+  const [name, setName] = useState(scannedName); // Nutzt den Namen, falls vorhanden
+  const [ean, setEan] = useState(scannedEan);    // Speichert den EAN-Code
   const [quantity, setQuantity] = useState(1);
   const [locationId, setLocationId] = useState('');
   const [tags, setTags] = useState<string[]>([]);
@@ -29,6 +34,12 @@ export default function NewItem() {
   const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
+    // NEU: Liest den Scanner-Code und Namen aus der URL
+    const params = new URLSearchParams(window.location.search);
+    const scannedEan = params.get('ean');
+    const scannedName = params.get('name');
+    if (scannedEan) setEan(scannedEan);
+    if (scannedName) setName(scannedName);
     const fetchData = async () => {
       const locSnapshot = await getDocs(collection(db, 'locations'));
       const locs: any[] = [];
@@ -60,6 +71,7 @@ export default function NewItem() {
 
       await addDoc(collection(db, 'items'), {
         name,
+        ean,
         tags,
         quantity,
         locationId,
@@ -95,7 +107,16 @@ export default function NewItem() {
         <form onSubmit={handleSubmit} className="space-y-6">
           <div className="space-y-4">
             <input type="text" value={name} onChange={(e) => setName(e.target.value)} className="w-full p-3 border border-slate-300 rounded-xl bg-white text-slate-900 outline-none font-bold text-lg" placeholder="Bezeichnung (z.B. Makita Flex)" required />
-            
+            {/* NEU: Anzeige des Barcodes (falls vorhanden) */}
+            {ean && (
+              <div className="flex items-center gap-2 bg-slate-100 p-2 rounded-lg border border-slate-200">
+                <span className="text-xl">📦</span>
+                <div>
+                  <p className="text-[10px] text-slate-500 font-bold uppercase">Verknüpfter Barcode</p>
+                  <p className="text-sm font-mono text-slate-700">{ean}</p>
+                </div>
+              </div>
+            )}
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-2">Tags / Kategorien</label>
               <TagSelector selectedTags={tags} onTagsChange={setTags} />

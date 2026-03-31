@@ -15,7 +15,6 @@ export default function Scanner() {
   const scannerRef = useRef<Html5QrcodeScanner | null>(null);
 
   useEffect(() => {
-    // Verhindert doppeltes Laden im React Strict Mode
     if (!scannerRef.current) {
       scannerRef.current = new Html5QrcodeScanner(
         "reader", 
@@ -25,7 +24,9 @@ export default function Scanner() {
 
       scannerRef.current.render(
         async (decodedText) => {
-          // 1. Kamera sofort anhalten, wenn ein Code gefunden wurde!
+          // NEU: Wir loggen das in die Entwickler-Konsole des Browsers!
+          console.log("Scanner hat exakt diesen Code gelesen:", decodedText);
+          
           if (scannerRef.current) {
             scannerRef.current.clear();
           }
@@ -34,26 +35,23 @@ export default function Scanner() {
           setStatusMessage("Prüfe Datenbank...");
 
           try {
-            // CHECK 1: Ist es ein Lagerort-Code? (Für die Zukunft)
             const locRef = doc(db, 'locations', decodedText);
             const locSnap = await getDoc(locRef);
             if (locSnap.exists()) {
               setStatusMessage("Lagerort gefunden!");
-              router.push(`/?location=${decodedText}`); // Später bauen wir hier einen Filter ein
+              router.push(`/?location=${decodedText}`); 
               return;
             }
 
-            // CHECK 2: Ist es ein EAN-Code von einem bekannten Item?
             const q = query(collection(db, 'items'), where('ean', '==', decodedText));
             const querySnapshot = await getDocs(q);
             if (!querySnapshot.empty) {
               setStatusMessage("Item gefunden!");
               const existingItem = querySnapshot.docs[0];
-              router.push(`/item/${existingItem.id}`); // Springt direkt zum Werkzeug!
+              router.push(`/item/${existingItem.id}`); 
               return;
             }
 
-            // CHECK 3: Unbekannter Code! (Neues Item)
             setStatusMessage("Unbekannter Barcode.");
             setIsProcessing(false);
 
@@ -89,11 +87,10 @@ export default function Scanner() {
             <div className="w-16 h-16 bg-orange-100 text-orange-600 rounded-full flex items-center justify-center mx-auto mb-4 text-3xl">📦</div>
             <h2 className="text-xl font-bold text-slate-800 mb-2">Neuer Code erkannt!</h2>
             <p className="text-slate-600 mb-6 bg-slate-50 p-3 rounded-lg font-mono text-sm break-all">
-              EAN: {scanResult}
+              Gelesener Code: {scanResult}
             </p>
             <p className="text-sm text-slate-500 mb-6">Dieses Item existiert noch nicht in deiner Werkstatt.</p>
             
-            {/* Hier übergeben wir den EAN-Code in der URL! */}
             <button onClick={() => router.push(`/new?ean=${scanResult}`)} className="w-full bg-orange-600 text-white font-bold py-3 rounded-lg hover:bg-orange-700 transition mb-3">
               Neues Item damit anlegen
             </button>
@@ -104,7 +101,6 @@ export default function Scanner() {
         ) : (
           <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-100 relative">
             <div id="reader" className="w-full rounded-lg overflow-hidden"></div>
-            {/* Overlay-Nachricht */}
             <div className="absolute bottom-4 left-0 right-0 text-center">
               <span className="bg-slate-800/80 text-white px-4 py-2 rounded-full text-sm backdrop-blur-sm">
                 {statusMessage}

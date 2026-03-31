@@ -1,221 +1,113 @@
 "use client";
 
-import { useState, useEffect, Suspense } from 'react';
-import { db } from '../../lib/firebase'; 
-import { collection, addDoc, getDocs, serverTimestamp } from 'firebase/firestore';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useEffect, useState, useRef } from 'react';
+import { Html5QrcodeScanner } from 'html5-qrcode';
+import { db } from '../../lib/firebase';
+import { collection, query, where, getDocs, doc, getDoc } from 'firebase/firestore';
+import { useRouter } from 'next/navigation';
+import Link from 'next/link';
 
-function NewItemForm() {
+export default function Scanner() {
   const router = useRouter();
-  const searchParams = useSearchParams();
-  const prefilledEan = searchParams.get('ean') || ''; 
-  
-  const [name, setName] = useState('');
-  const [tags, setTags] = useState<string[]>([]);
-  const [quantity, setQuantity] = useState(1);
-  const [locationId, setLocationId] = useState(''); 
-  const [locations, setLocations] = useState<any[]>([]); 
-  const [ean, setEan] = useState(prefilledEan); 
-  const [isSaving, setIsSaving] = useState(false);
-  const [isFetchingApi, setIsFetchingApi] = useState(false);
-
-  const [selectedLocationImage, setSelectedLocationImage] = useState<string | null>(null);
-  const [tagCoords, setTagCoords] = useState<{x: number, y: number} | null>(null);
+  const [scanResult, setScanResult] = useState("");
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [statusMessage, setStatusMessage] = useState("Kamera wird gestartet...");
+  const scannerRef = useRef<Html5QrcodeScanner | null>(null);
 
   useEffect(() => {
-    const fetchLocations = async () => {
-      const querySnapshot = await getDocs(collection(db, 'locations'));
-      const locs: any[] = [];
-      querySnapshot.forEach((doc) => { locs.push({ id: doc.id, ...doc.data() }); });
-      setLocations(locs);
-    };
-    fetchLocations();
-  }, []);
+    if (!scannerRef.current) {
+      scannerRef.current = new Html5QrcodeScanner(
+        "reader", 
+        { fps: 10, qrbox: { width: 250, height: 250 }, rememberLastUsedCamera: true },
+        false
+      );
 
-  useEffect(() => {
-    if (ean) {
-      const fetchEanData = async () => {
-        setIsFetchingApi(true);
-        try {
-          const response = await fetch(`https://api.upcitemdb.com/prod/trial/lookup?upc=${ean}`);
-          const data = await response.json();
-
-          if (data && data.items && data.items.length > 0) {
-            const foundTitle = data.items[0].title;
-            setName(foundTitle);
-            generateSmartTagsFor(foundTitle);
+      scannerRef.current.render(
+        async (decodedText) => {
+          // NEU: Wir loggen das in die Entwickler-Konsole des Browsers!
+          console.log("Scanner hat exakt diesen Code gelesen:", decodedText);
+          
+          if (scannerRef.current) {
+            scannerRef.current.clear();
           }
-        } catch (error) {
-          console.error("Fehler beim Abrufen der EAN-Daten:", error);
-        } finally {
-          setIsFetchingApi(false);
+          setScanResult(decodedText);
+          setIsProcessing(true);
+          setStatusMessage("Prüfe Datenbank...");
+
+          try {
+            const locRef = doc(db, 'locations', decodedText);
+            const locSnap = await getDoc(locRef);
+            if (locSnap.exists()) {
+              setStatusMessage("Lagerort gefunden!");
+              router.push(`/?location=${decodedText}`); 
+              return;
+            }
+
+            const q = query(collection(db, 'items'), where('ean', '==', decodedText));
+            const querySnapshot = await getDocs(q);
+            if (!querySnapshot.empty) {
+              setStatusMessage("Item gefunden!");
+              const existingItem = querySnapshot.docs[0];
+              router.push(`/item/${existingItem.id}`); 
+              return;
+            }
+
+            setStatusMessage("Unbekannter Barcode.");
+            setIsProcessing(false);
+
+          } catch (error) {
+            console.error("Fehler beim Prüfen:", error);
+            setStatusMessage("Fehler bei der Datenbank-Abfrage.");
+            setIsProcessing(false);
+          }
+        },
+        (error) => {
+          setStatusMessage("Suche nach Barcode/QR-Code...");
         }
-      };
-      
-      fetchEanData();
+      );
     }
-  }, [ean]);
 
-  const generateSmartTagsFor = (itemName: string) => {
-    const lowerName = itemName.toLowerCase();
-    let newTags = [];
-    if (lowerName.includes('bohr') || lowerName.includes('flex') || lowerName.includes('schleifer')) newTags.push('Werkzeug', 'Maschine');
-    if (lowerName.includes('schraube') || lowerName.includes('nagel') || lowerName.includes('dübel')) newTags.push('Verbrauchsmaterial');
-    if (lowerName.includes('holz')) newTags.push('Holzbearbeitung');
-    if (lowerName.includes('metall')) newTags.push('Metallbearbeitung');
-    if (newTags.length === 0) newTags.push('Allgemein');
-    setTags(newTags);
-  };
+    return () => {
+      if (scannerRef.current) {
+        scannerRef.current.clear().catch(e => console.error(e));
+      }
+    };
+  }, [router]);
 
-  const handleManualTagClick = () => generateSmartTagsFor(name);
-
-  const getLocationDisplayName = (loc: any) => {
-    if (!loc.parentId) return loc.name; 
-    const parent = locations.find(l => l.id === loc.parentId);
-    return parent ? `${loc.name} (in ${parent.name})` : loc.name;
-  };
-
-  const handleLocationChange = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const newLocId = e.target.value;
-    setLocationId(newLocId);
-    setTagCoords(null); 
-    const selectedLoc = locations.find(loc => loc.id === newLocId);
-    if (selectedLoc && selectedLoc.imageUrl) {
-      setSelectedLocationImage(selectedLoc.imageUrl);
-    } else {
-      setSelectedLocationImage(null);
-    }
-  };
-
-  const handleImageClick = (e: any) => {
-    const rect = e.target.getBoundingClientRect();
-    const x = ((e.clientX - rect.left) / rect.width) * 100;
-    const y = ((e.clientY - rect.top) / rect.height) * 100;
-    setTagCoords({ x, y });
-  };
-
-  const handleSave = async (e: React.FormEvent<HTMLFormElement>) => {
-    e.preventDefault();
-    if (!locationId) { alert("Bitte wähle einen Lagerort aus!"); return; }
-    setIsSaving(true);
-
-    try {
-      await addDoc(collection(db, 'items'), {
-        name,
-        tags,
-        quantity,
-        ean,
-        status: 'AVAILABLE',
-        locationId: locationId, 
-        tagX: tagCoords ? tagCoords.x : null,
-        tagY: tagCoords ? tagCoords.y : null,
-        createdAt: serverTimestamp()
-      });
-      router.push('/'); 
-    } catch (error) {
-      console.error("Fehler: ", error);
-      alert('Fehler beim Speichern. Siehe Console.');
-    } finally {
-      setIsSaving(false);
-    }
-  };
-
-  return (
-    <form onSubmit={handleSave} className="space-y-6">
-      
-      {ean && (
-        <div className="bg-slate-800 text-white p-3 rounded-lg flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <span className="text-2xl">📸</span>
-            <div>
-              <p className="text-xs text-slate-400">Gescannter Barcode</p>
-              <p className="font-mono font-medium">{ean}</p>
-            </div>
-          </div>
-          {isFetchingApi && (
-            <span className="text-xs bg-slate-700 px-2 py-1 rounded-full animate-pulse text-orange-300">
-              Suche... 🌍
-            </span>
-          )}
-        </div>
-      )}
-
-      <div>
-        <label className="block text-sm font-medium text-slate-700 mb-1">Was möchtest du erfassen?</label>
-        <div className="flex gap-2">
-          <input 
-            type="text" 
-            value={name} 
-            onChange={(e) => setName(e.target.value)} 
-            className={`w-full p-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-orange-500 outline-none transition-colors ${isFetchingApi ? 'bg-slate-100 text-slate-400' : 'bg-white'}`} 
-            required 
-            placeholder="z.B. Makita Winkelschleifer" 
-            disabled={isFetchingApi}
-          />
-          <button type="button" onClick={handleManualTagClick} className="bg-slate-800 text-white px-4 py-2 rounded-lg text-sm whitespace-nowrap">✨ Tags</button>
-        </div>
-      </div>
-
-      {tags.length > 0 && (
-        <div className="bg-orange-50 p-4 rounded-lg border border-orange-100">
-          <div className="flex flex-wrap gap-2">
-            {tags.map((tag, index) => (
-              <span key={index} className="bg-white border border-orange-200 text-orange-700 text-xs px-2 py-1 rounded-full">{tag}</span>
-            ))}
-          </div>
-        </div>
-      )}
-
-      <div>
-          <label className="block text-sm font-medium text-slate-700 mb-1">Menge / Bestand</label>
-          <input type="number" value={quantity} onChange={(e) => setQuantity(Number(e.target.value))} className="w-32 p-2 border border-slate-300 rounded-lg outline-none" min="1" />
-      </div>
-
-      <div className="border-t pt-4">
-        <label className="block text-sm font-medium text-slate-700 mb-2">Wo wird das aufbewahrt?</label>
-        {locations.length === 0 ? (
-          <p className="text-sm text-red-500 bg-red-50 p-3 rounded-md border border-red-100">
-            Du hast noch keine Lagerorte angelegt!
-          </p>
-        ) : (
-          <select value={locationId} onChange={handleLocationChange} className="w-full p-3 border border-slate-300 rounded-lg outline-none bg-white focus:ring-2 focus:ring-orange-500" required>
-            <option value="">-- Bitte Lagerort wählen --</option>
-            {locations.map(loc => (
-              <option key={loc.id} value={loc.id}>{getLocationDisplayName(loc)}</option>
-            ))}
-          </select>
-        )}
-      </div>
-
-      {selectedLocationImage && (
-        <div className="bg-slate-50 p-4 rounded-lg border border-slate-200 mt-4 animate-fade-in">
-          <p className="text-sm text-slate-600 mb-2">
-            <span className="font-semibold text-orange-600">Optional:</span> Klicke auf das Bild, um die genaue Position zu markieren.
-          </p>
-          <div className="relative inline-block border-2 border-white shadow-md rounded-lg overflow-hidden">
-            <img src={selectedLocationImage} alt="Lagerort Vorschau" onClick={handleImageClick} className="max-w-full h-auto cursor-crosshair hover:opacity-90 transition-opacity" />
-            {tagCoords && (
-              <div className="absolute w-6 h-6 bg-red-600 border-2 border-white rounded-full shadow-lg pointer-events-none" style={{ left: `${tagCoords.x}%`, top: `${tagCoords.y}%`, transform: 'translate(-50%, -50%)' }} />
-            )}
-          </div>
-        </div>
-      )}
-
-      <button type="submit" disabled={isSaving || locations.length === 0 || isFetchingApi} className="w-full bg-orange-600 text-white font-bold py-3 rounded-lg hover:bg-orange-700 disabled:opacity-50 mt-8">
-        {isSaving ? 'Speichert...' : 'Item in Datenbank speichern'}
-      </button>
-    </form>
-  );
-}
-
-export default function NewItem() {
   return (
     <div className="min-h-screen bg-slate-50 p-4 md:p-8">
-      <div className="max-w-xl mx-auto bg-white p-6 rounded-xl shadow-sm border border-slate-100">
-        <h1 className="text-2xl font-bold mb-6 text-slate-800">Neues Item erfassen</h1>
-        <Suspense fallback={<div className="text-center text-slate-500 p-8">Lade Formular...</div>}>
-          <NewItemForm />
-        </Suspense>
+      <div className="max-w-md mx-auto">
+        <div className="flex justify-between items-center mb-6">
+          <h1 className="text-2xl font-bold text-slate-800">Scanner</h1>
+          <Link href="/" className="text-sm font-medium text-slate-500 hover:text-slate-800">Abbrechen</Link>
+        </div>
+
+        {scanResult && !isProcessing ? (
+          <div className="bg-white p-6 rounded-xl shadow-sm border border-orange-200 text-center animate-fade-in">
+            <div className="w-16 h-16 bg-orange-100 text-orange-600 rounded-full flex items-center justify-center mx-auto mb-4 text-3xl">📦</div>
+            <h2 className="text-xl font-bold text-slate-800 mb-2">Neuer Code erkannt!</h2>
+            <p className="text-slate-600 mb-6 bg-slate-50 p-3 rounded-lg font-mono text-sm break-all">
+              Gelesener Code: {scanResult}
+            </p>
+            <p className="text-sm text-slate-500 mb-6">Dieses Item existiert noch nicht in deiner Werkstatt.</p>
+            
+            <button onClick={() => router.push(`/new?ean=${scanResult}`)} className="w-full bg-orange-600 text-white font-bold py-3 rounded-lg hover:bg-orange-700 transition mb-3">
+              Neues Item damit anlegen
+            </button>
+            <button onClick={() => window.location.reload()} className="w-full bg-slate-200 text-slate-800 font-bold py-3 rounded-lg hover:bg-slate-300 transition">
+              Erneut scannen
+            </button>
+          </div>
+        ) : (
+          <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-100 relative">
+            <div id="reader" className="w-full rounded-lg overflow-hidden"></div>
+            <div className="absolute bottom-4 left-0 right-0 text-center">
+              <span className="bg-slate-800/80 text-white px-4 py-2 rounded-full text-sm backdrop-blur-sm">
+                {statusMessage}
+              </span>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

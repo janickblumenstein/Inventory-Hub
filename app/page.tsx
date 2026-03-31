@@ -181,35 +181,36 @@ export default function Dashboard() {
 
   return (
     <div className={`min-h-screen bg-slate-50 ${isSelectionMode ? 'pb-32' : 'pb-20'}`}>
-      
-      {/* HEADER - Absolut clean, keine doppelten Buttons mehr */}
+      {/* HEADER - Verschlankt für mobile Displays */}
       <header className="bg-slate-900 text-white pt-6 pb-6 px-4 md:px-8 shadow-md transition-all sticky top-0 z-40">
         <div className="max-w-5xl mx-auto flex justify-between items-center">
-<div>
-            <h1 className="text-2xl font-black tracking-tight flex items-center gap-1.5">
-              <span className="text-2xl">🛖</span>
+          
+          <div className="min-w-0 pr-2">
+            <h1 className="text-xl sm:text-2xl font-black tracking-tight flex items-center gap-1.5 truncate">
+              <span className="text-xl sm:text-2xl">🛖</span>
               <span className="text-orange-500">Shed</span>
               <span className="text-white">Sync</span>
             </h1>
-            <p className="text-slate-400 text-[10px] uppercase tracking-widest mt-0.5 font-bold">
-              {items.length} Items synchronisiert
-            </p>
           </div>
-          <div className="flex gap-2 items-center">
-            
+          
+          <div className="flex gap-1.5 sm:gap-2 items-center shrink-0">
+            {/* Massenmutation (Nur noch Icon) */}
             <button 
               onClick={() => { setIsSelectionMode(!isSelectionMode); setSelectedItemIds(new Set()); }}
-              className={`p-2 sm:px-3 sm:py-2 rounded-lg text-sm font-bold transition flex items-center gap-2 ${isSelectionMode ? 'bg-orange-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}
+              className={`p-2 sm:p-2.5 rounded-lg text-lg transition flex items-center justify-center ${isSelectionMode ? 'bg-orange-600 text-white' : 'bg-slate-800 text-slate-300 hover:bg-slate-700'}`}
+              title="Mehrere bearbeiten"
             >
-              {isSelectionMode ? 'Abbrechen' : '✏️ Mehrere bearbeiten'}
+              {isSelectionMode ? '❌' : '☑️'}
             </button>
             
             {!isSelectionMode && (
               <>
+                {/* NEU: Verleih Übersicht */}
+                <Link href="/loans" className="p-2 sm:p-2.5 bg-slate-800 hover:bg-slate-700 rounded-lg text-lg transition" title="Verleih">🤝</Link>
                 <Link href="/locations" className="p-2 sm:p-2.5 bg-slate-800 hover:bg-slate-700 rounded-lg text-lg transition" title="Lagerorte">🏗️</Link>
                 <Link href="/scanner" className="p-2 sm:p-2.5 bg-slate-800 hover:bg-slate-700 rounded-lg text-lg transition" title="Scanner">📷</Link>
-                <Link href="/new" className="bg-orange-600 hover:bg-orange-700 text-white font-bold py-2 px-3 sm:px-4 rounded-lg transition shadow-sm flex items-center gap-2">
-                  <span className="text-xl leading-none">+</span> <span className="hidden sm:inline">Neu</span>
+                <Link href="/new" className="bg-orange-600 hover:bg-orange-700 text-white font-bold p-2 sm:px-3 rounded-lg transition shadow-sm flex items-center justify-center">
+                  <span className="text-xl leading-none">+</span>
                 </Link>
               </>
             )}

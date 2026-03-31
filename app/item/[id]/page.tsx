@@ -307,15 +307,32 @@ export default function ItemDetail({ params }: { params: Promise<{ id: string }>
             </div>
           )}
 
-          {/* LAGERORT INFO */}
-          <div className="border-t pt-6">
+{/* LAGERORT INFO */}
+          <div className="border-t border-slate-100 pt-6 mt-8">
             <h3 className="text-sm font-bold text-slate-500 uppercase tracking-wider mb-2">Lagerort</h3>
-            <p className="text-lg font-medium text-slate-800">
+            <p className="text-lg font-medium text-slate-800 mb-4">
               📍 {location ? location.name : 'Nicht zugewiesen'}
             </p>
+            
             {location && location.imageUrl && (
-              <div className="mt-3 rounded-lg overflow-hidden border border-slate-200">
-                <img src={location.imageUrl} alt="Lagerort" className="w-full h-48 object-cover" />
+              <div className="relative inline-block border-2 border-slate-200 rounded-lg overflow-hidden shadow-sm w-full">
+                {/* w-full und h-auto verhindern das Abschneiden und zeigen das ganze Bild */}
+                <img 
+                  src={location.imageUrl} 
+                  alt="Lagerort" 
+                  className="w-full h-auto block" 
+                />
+                
+                {/* Der rote Punkt (nur anzeigen, wenn Koordinaten gespeichert wurden) */}
+                {item.tagX !== undefined && item.tagY !== undefined && item.tagX !== null && item.tagY !== null && (
+                  <div 
+                    className="absolute w-5 h-5 bg-red-600 border-2 border-white rounded-full shadow-[0_0_10px_rgba(0,0,0,0.5)] transform -translate-x-1/2 -translate-y-1/2 pointer-events-none"
+                    style={{ left: `${item.tagX}%`, top: `${item.tagY}%` }}
+                  >
+                    {/* Ein dezenter Radar-Puls-Effekt, damit man den Punkt sofort sieht */}
+                    <div className="absolute inset-0 bg-red-600 rounded-full animate-ping opacity-75"></div>
+                  </div>
+                )}
               </div>
             )}
           </div>

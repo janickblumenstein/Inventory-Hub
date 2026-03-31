@@ -203,9 +203,11 @@ const filteredItems = useMemo(() => {
         <div className="max-w-5xl mx-auto flex justify-between items-center">
           
           <div className="min-w-0 pr-2">
-            <h1 className="text-xl sm:text-2xl font-black tracking-tight flex items-center gap-1.5 truncate">
-              <span className="text-xl sm:text-2xl">🛖</span>
-              <span className="text-orange-500">Shed</span>
+          <h1 className="text-xl sm:text-2xl font-black tracking-tight flex items-center gap-1.5 truncate">
+              <svg className="w-6 h-6 sm:w-8 sm:h-8 text-orange-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
+              </svg>
+              <span className="text-orange-500 ml-1">Shed</span>
               <span className="text-white">Sync</span>
             </h1>
           </div>
@@ -255,15 +257,54 @@ const filteredItems = useMemo(() => {
           </div>
         )}
 
-        {/* SUCHE & FILTER */}
+{/* SUCHE & FILTER */}
         <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 mb-6">
-          <input type="text" placeholder="🔍 Suchen..." value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg text-slate-900 outline-none focus:ring-2 focus:ring-orange-500 mb-4" />
+          <input 
+            type="text" 
+            placeholder="🔍 Suchen nach Werkzeug oder Tag..." 
+            value={searchTerm} 
+            onChange={(e) => setSearchTerm(e.target.value)} 
+            className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg text-slate-900 outline-none focus:ring-2 focus:ring-orange-500 mb-3" 
+          />
           
+          {/* DIE TAG-LEISTE (Scrollbar) */}
+          {availableTags.length > 0 && (
+            <div className="flex overflow-x-auto gap-2 pb-3 scrollbar-hide">
+              {availableTags.map(tag => {
+                const isSelected = selectedFilterTags.includes(tag);
+                return (
+                  <button 
+                    key={tag} 
+                    onClick={() => toggleFilterTag(tag)} 
+                    className={`whitespace-nowrap px-3 py-1.5 rounded-full text-xs font-medium transition-colors border ${
+                      isSelected 
+                        ? 'bg-orange-100 text-orange-800 border-orange-300 shadow-inner' 
+                        : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                    }`}
+                  >
+                    {isSelected && '✓ '} {tag}
+                  </button>
+                );
+              })}
+            </div>
+          )}
+          
+          {/* ANSICHTS-STEUERUNG */}
           <div className="flex items-center justify-between pt-4 border-t border-slate-100">
             <span className="text-sm font-medium text-slate-500">Ansicht:</span>
             <div className="flex bg-slate-100 p-1 rounded-lg">
-              <button onClick={() => setGroupBy('location')} className={`px-3 py-1.5 text-xs font-bold rounded-md transition ${groupBy === 'location' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>📍 Ort</button>
-              <button onClick={() => setGroupBy('category')} className={`px-3 py-1.5 text-xs font-bold rounded-md transition ${groupBy === 'category' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>🏷️ Typ</button>
+              <button 
+                onClick={() => setGroupBy('location')} 
+                className={`px-3 py-1.5 text-xs font-bold rounded-md transition ${groupBy === 'location' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+              >
+                📍 Ort
+              </button>
+              <button 
+                onClick={() => setGroupBy('category')} 
+                className={`px-3 py-1.5 text-xs font-bold rounded-md transition ${groupBy === 'category' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+              >
+                🏷️ Typ
+              </button>
             </div>
           </div>
         </div>
@@ -283,8 +324,15 @@ const filteredItems = useMemo(() => {
                 <div className="w-full flex justify-between items-center bg-slate-50/50 hover:bg-slate-100 transition border-b border-slate-100">
                   <button onClick={() => toggleGroup(groupName)} className="flex-1 flex items-center gap-3 p-4 text-left">
                     <span className="text-slate-400 font-mono text-xl leading-none w-4">{expandedGroups[groupName] ? '−' : '+'}</span>
-                    <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2">
-                      {groupName} <span className="text-xs font-normal text-slate-500 bg-white px-2 py-0.5 rounded-full border border-slate-200">{itemsInGroup.length}</span>
+                    <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2 flex-wrap">
+                      {groupName} 
+                      {/* Zeigt den Code des Lagerorts dezent an */}
+                      {groupBy === 'location' && locations.find(l => l.name === groupName)?.code && (
+                        <span className="text-xs font-mono text-slate-400 bg-slate-100 px-2 py-0.5 rounded border border-slate-200">
+                          {locations.find(l => l.name === groupName)?.code}
+                        </span>
+                      )}
+                      <span className="text-xs font-normal text-slate-500 bg-white px-2 py-0.5 rounded-full border border-slate-200 ml-1">{itemsInGroup.length}</span>
                     </h2>
                   </button>
 
@@ -326,8 +374,27 @@ const filteredItems = useMemo(() => {
 
                             <div className="flex-1 min-w-0">
                               <h3 className={`font-bold truncate transition ${isSelected ? 'text-orange-900' : 'text-slate-900 group-hover:text-orange-700'}`}>{item.name}</h3>
+                              
+                              {/* Sub-Path MIT Code anzeigen */}
                               {groupBy === 'location' && item.subPath && (
-                                <span className="inline-block mt-1 text-[10px] font-bold text-orange-600 bg-orange-50 px-2 py-0.5 rounded border border-orange-100">📍 {item.subPath}</span>
+                                <span className="inline-flex items-center gap-1 mt-1 text-[10px] font-bold text-orange-600 bg-orange-50 px-2 py-0.5 rounded border border-orange-100">
+                                  📍 {item.subPath}
+                                  {locations.find(l => l.id === item.locationId)?.code && (
+                                    <span className="text-[9px] font-mono text-orange-400 opacity-80">
+                                      [{locations.find(l => l.id === item.locationId)?.code}]
+                                    </span>
+                                  )}
+                                </span>
+                              )}
+
+                              {/* Wenn nicht nach Ort gruppiert wird, zeige ebenfalls den Code */}
+                              {groupBy !== 'location' && item.locationId && (
+                                <span className="block mt-1 text-[10px] text-slate-400 truncate">
+                                  📍 {getRootLocationName(item.locationId, locations)} {item.subPath && `> ${item.subPath}`}
+                                  {locations.find(l => l.id === item.locationId)?.code && (
+                                    <span className="font-mono ml-1 opacity-70">[{locations.find(l => l.id === item.locationId)?.code}]</span>
+                                  )}
+                                </span>
                               )}
                             </div>
 

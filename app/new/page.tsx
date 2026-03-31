@@ -1,27 +1,27 @@
 "use client";
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Suspense } from 'react';
 import { db, storage } from '../../lib/firebase';
 import { collection, addDoc, getDocs } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { useRouter, useSearchParams } from 'next/navigation'; // <-- useSearchParams hinzufügen
+import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import TagSelector from '../../components/TagSelector'; 
 
-export default function NewItem() {
+// 1. Deine eigentliche Logik wird in eine eigene Komponente gepackt
+function NewItemForm() {
   const router = useRouter();
   
-const searchParams = useSearchParams();
+  const searchParams = useSearchParams();
   const scannedEan = searchParams?.get('ean') || '';
   const scannedName = searchParams?.get('name') || '';
 
-  const [name, setName] = useState(scannedName); // Nutzt den Namen, falls vorhanden
-  const [ean, setEan] = useState(scannedEan);    // Speichert den EAN-Code
+  const [name, setName] = useState(scannedName);
+  const [ean, setEan] = useState(scannedEan);
   const [quantity, setQuantity] = useState(1);
   const [locationId, setLocationId] = useState('');
   const [tags, setTags] = useState<string[]>([]);
   
-  // NEU: Koordinaten für den roten Punkt
   const [tagX, setTagX] = useState<number | null>(null);
   const [tagY, setTagY] = useState<number | null>(null);
 
@@ -34,12 +34,13 @@ const searchParams = useSearchParams();
   const [isSaving, setIsSaving] = useState(false);
 
   useEffect(() => {
-    // NEU: Liest den Scanner-Code und Namen aus der URL
+    // Redundante URL-Prüfung zur Sicherheit
     const params = new URLSearchParams(window.location.search);
-    const scannedEan = params.get('ean');
-    const scannedName = params.get('name');
-    if (scannedEan) setEan(scannedEan);
-    if (scannedName) setName(scannedName);
+    const fallbackEan = params.get('ean');
+    const fallbackName = params.get('name');
+    if (fallbackEan && !ean) setEan(fallbackEan);
+    if (fallbackName && !name) setName(fallbackName);
+
     const fetchData = async () => {
       const locSnapshot = await getDocs(collection(db, 'locations'));
       const locs: any[] = [];
@@ -47,9 +48,8 @@ const searchParams = useSearchParams();
       setLocations(locs);
     };
     fetchData();
-  }, []);
+  }, [ean, name]);
 
-  // Setzt den Marker beim Klick auf das Bild
   const handleImageClick = (e: React.MouseEvent<HTMLImageElement>) => {
     const rect = e.currentTarget.getBoundingClientRect();
     const x = ((e.clientX - rect.left) / rect.width) * 100;
@@ -75,8 +75,8 @@ const searchParams = useSearchParams();
         tags,
         quantity,
         locationId,
-        tagX, // Speichert die X-Koordinate
-        tagY, // Speichert die Y-Koordinate
+        tagX,
+        tagY,
         price: showWarranty ? (Number(price) || 0) : null,
         purchaseDate: showWarranty ? purchaseDate : null,
         receiptUrl: showWarranty ? receiptUrl : null,
@@ -96,7 +96,6 @@ const searchParams = useSearchParams();
     <div className="min-h-screen bg-slate-50 p-4">
       <div className="max-w-xl mx-auto bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
         
-        {/* NEU: Header mit Icon-Button zum Abbrechen */}
         <div className="flex justify-between items-center mb-6">
           <h1 className="text-2xl font-bold text-slate-800">Neues Werkzeug</h1>
           <Link href="/" className="w-10 h-10 flex items-center justify-center bg-slate-100 text-slate-500 rounded-full hover:bg-slate-200 transition text-lg">
@@ -107,7 +106,7 @@ const searchParams = useSearchParams();
         <form onSubmit={handleSubmit} className="space-y-6">
           <div className="space-y-4">
             <input type="text" value={name} onChange={(e) => setName(e.target.value)} className="w-full p-3 border border-slate-300 rounded-xl bg-white text-slate-900 outline-none font-bold text-lg" placeholder="Bezeichnung (z.B. Makita Flex)" required />
-            {/* NEU: Anzeige des Barcodes (falls vorhanden) */}
+            
             {ean && (
               <div className="flex items-center gap-2 bg-slate-100 p-2 rounded-lg border border-slate-200">
                 <span className="text-xl">📦</span>
@@ -117,6 +116,7 @@ const searchParams = useSearchParams();
                 </div>
               </div>
             )}
+            
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-2">Tags / Kategorien</label>
               <TagSelector selectedTags={tags} onTagsChange={setTags} />
@@ -130,28 +130,27 @@ const searchParams = useSearchParams();
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-1">Lagerort</label>
                 <select value={locationId} onChange={(e) => { setLocationId(e.target.value); setTagX(null); setTagY(null); }} className="w-full p-3 border border-slate-300 rounded-xl bg-white text-slate-900" required>
-  <option value="">-- Ort wählen --</option>
-  {(() => {
-    const buildTree = (parentId: string | null, depth: number): any[] => {
-      let result: any[] = [];
-      const children = locations.filter(l => (l.parentId || null) === parentId);
-      children.forEach(child => {
-        result.push({ ...child, depth });
-        result = result.concat(buildTree(child.id, depth + 1));
-      });
-      return result;
-    };
-    return buildTree(null, 0).map(loc => (
-      <option key={loc.id} value={loc.id}>
-        {'\u00A0\u00A0\u00A0'.repeat(loc.depth)}{loc.depth > 0 ? '↳ ' : ''}{loc.name}
-      </option>
-    ));
-  })()}
-</select>
+                  <option value="">-- Ort wählen --</option>
+                  {(() => {
+                    const buildTree = (parentId: string | null, depth: number): any[] => {
+                      let result: any[] = [];
+                      const children = locations.filter(l => (l.parentId || null) === parentId);
+                      children.forEach(child => {
+                        result.push({ ...child, depth });
+                        result = result.concat(buildTree(child.id, depth + 1));
+                      });
+                      return result;
+                    };
+                    return buildTree(null, 0).map(loc => (
+                      <option key={loc.id} value={loc.id}>
+                        {'\u00A0\u00A0\u00A0'.repeat(loc.depth)}{loc.depth > 0 ? '↳ ' : ''}{loc.name}
+                      </option>
+                    ));
+                  })()}
+                </select>
               </div>
             </div>
 
-            {/* NEU: Bild des Lagerorts mit Klick-Marker */}
             {selectedLoc && selectedLoc.imageUrl && (
               <div className="mt-4 p-4 bg-slate-50 border border-slate-200 rounded-xl animate-fade-in">
                 <p className="text-xs text-slate-500 mb-2 uppercase font-bold tracking-wider">Wo genau liegt es? (Klicke auf das Bild)</p>
@@ -194,5 +193,14 @@ const searchParams = useSearchParams();
         </form>
       </div>
     </div>
+  );
+}
+
+// 2. Deine exportierte Seite ummantelt das Formular nun sicher mit Suspense!
+export default function NewItem() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-slate-50 flex items-center justify-center text-slate-500 font-medium">Lade Formular...</div>}>
+      <NewItemForm />
+    </Suspense>
   );
 }

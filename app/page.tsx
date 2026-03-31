@@ -42,7 +42,7 @@ export default function Dashboard() {
         initialExpanded[getRootLocationName(item.locationId, locList)] = true;
         initialExpanded[item.category || 'ALLGEMEIN'] = true;
       });
-      setExpandedGroups(initialExpanded);
+      setExpandedGroups({});
     } catch (error) {
       console.error("Fehler:", error);
     } finally {
@@ -231,6 +231,7 @@ const filteredItems = useMemo(() => {
                 <Link href="/new" className="bg-orange-600 hover:bg-orange-700 text-white font-bold p-2 sm:px-3 rounded-lg transition shadow-sm flex items-center justify-center">
                   <span className="text-xl leading-none">+</span>
                 </Link>
+                <Link href="/settings" className="...">⚙️</Link>
               </>
             )}
           </div>

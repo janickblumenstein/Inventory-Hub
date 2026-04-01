@@ -378,7 +378,7 @@ export default function Dashboard() {
       <main className="max-w-5xl mx-auto p-4 md:p-8 mt-4 relative">
         
         {/* MIGRATIONS-HINWEIS (Verschwindet, wenn Items da sind) */}
-        {items.length === 0 && (
+        {/*{items.length === 0 && (
           <div className="bg-blue-50 border border-blue-200 p-6 rounded-2xl mb-8 text-center shadow-sm">
             <h2 className="text-blue-900 font-black text-lg mb-2">👋 Willkommen im neuen Workspace!</h2>
             <p className="text-blue-700 text-sm mb-4">Deine Werkstatt "{workspaceId}" ist noch leer. Möchtest du deine alten Daten in diesen sicheren Raum verschieben?</p>
@@ -386,7 +386,7 @@ export default function Dashboard() {
               {isMigrating ? 'Kopiere Daten...' : '📥 Alte Daten jetzt importieren'}
             </button>
           </div>
-        )}
+        )}*/}
 
         {scannedLocationFilter && (
           <div className="bg-orange-100 border border-orange-200 text-orange-900 p-4 rounded-xl flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-6 shadow-sm animate-fade-in">

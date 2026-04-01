@@ -1,98 +1,72 @@
 "use client";
 
-import { useState, useEffect, Suspense } from 'react';
-import { db, storage } from '../../lib/firebase';
-import { collection, addDoc, getDocs, doc, getDoc,updateDoc } from 'firebase/firestore';
-import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useState, useEffect } from 'react';
+import { db } from '../../lib/firebase';
+import { collection, addDoc, getDoc, doc, getDocs } from 'firebase/firestore';
+import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import type { CategoryConfig } from '../settings/page'; 
+import type { CategoryConfig } from '../settings/page';
 import { useWorkspace } from '../../context/WorkspaceContext';
 
-function NewItemForm() {
-  const { workspaceId } = useWorkspace();
+export default function NewItem() {
   const router = useRouter();
+  const { workspaceId } = useWorkspace();
   
-  const searchParams = useSearchParams();
-  const scannedEan = searchParams?.get('ean') || '';
-  const scannedName = searchParams?.get('name') || '';
-
-  const [name, setName] = useState(scannedName);
-  const [ean, setEan] = useState(scannedEan);
+  // Standard-Felder
+  const [name, setName] = useState('');
+  const [ean, setEan] = useState('');
   const [quantity, setQuantity] = useState(1);
   const [locationId, setLocationId] = useState('');
   
-  // Dynamische Kategorie & Tags
+  // Kategorien & Tags
   const [categories, setCategories] = useState<CategoryConfig[]>([]);
   const [selectedCategoryId, setSelectedCategoryId] = useState<string>('');
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
-  const [attributes, setAttributes] = useState<Record<string, string>>({});
-  
-  // NEU: Freitext-Feld für spontane Tags
   const [customTagInput, setCustomTagInput] = useState('');
-
+  
+  // Attribute & Koordinaten
+  const [attributes, setAttributes] = useState<Record<string, string>>({});
   const [tagX, setTagX] = useState<number | null>(null);
   const [tagY, setTagY] = useState<number | null>(null);
-
-  const [showWarranty, setShowWarranty] = useState(false);
-  const [price, setPrice] = useState('');
-  const [purchaseDate, setPurchaseDate] = useState(new Date().toISOString().split('T')[0]);
-  const [receiptFile, setReceiptFile] = useState<File | null>(null);
-
   const [locations, setLocations] = useState<any[]>([]);
+
+  // 🪄 Smart-Link State
+  const [productUrl, setProductUrl] = useState('');
+  const [isFetchingUrl, setIsFetchingUrl] = useState(false);
+  const [scrapedImageUrl, setScrapedImageUrl] = useState('');
+
+  // 🔍 EAN-Suche State
+  const [isSearchingEan, setIsSearchingEan] = useState(false);
+  // Diese Shops kannst du später dynamisch aus den Settings laden!
+  const preferredShops = ["galaxus.ch", "hornbach.ch", "obi.ch", "brack.ch"];
+
   const [isSaving, setIsSaving] = useState(false);
-  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
     if (!workspaceId) return;
-    // URL Parameter Fallback
-    const params = new URLSearchParams(window.location.search);
-    const fallbackEan = params.get('ean');
-    const fallbackName = params.get('name');
-    if (fallbackEan && !ean) setEan(fallbackEan);
-    if (fallbackName && !name) setName(fallbackName);
 
     const fetchData = async () => {
-      try {
-        const locSnapshot = await getDocs(collection(db, 'workspaces', workspaceId!, 'locations'));
-        const locs: any[] = [];
-        locSnapshot.forEach((doc) => { locs.push({ id: doc.id, ...doc.data() }); });
-        setLocations(locs);
+      const locSnapshot = await getDocs(collection(db, 'workspaces', workspaceId, 'locations'));
+      const locs: any[] = [];
+      locSnapshot.forEach((doc) => { locs.push({ id: doc.id, ...doc.data() }); });
+      setLocations(locs);
 
-        const settingsSnap = await getDoc(doc(db, 'workspaces', workspaceId!, 'settings', 'main'));
-        if (settingsSnap.exists() && settingsSnap.data().categories) {
-          setCategories(settingsSnap.data().categories);
-        }
-      } catch (error) {
-        console.error("Fehler beim Laden:", error);
-      } finally {
-        setIsLoading(false);
+      const settingsSnap = await getDoc(doc(db, 'workspaces', workspaceId, 'settings', 'main'));
+      if (settingsSnap.exists() && settingsSnap.data().categories) {
+        setCategories(settingsSnap.data().categories);
       }
     };
     fetchData();
-  }, [ean, name]);
+  }, [workspaceId]);
 
-  const handleCategorySelect = (cat: CategoryConfig) => {
-    setSelectedCategoryId(cat.id);
-    setSelectedTags([]); 
-    setAttributes({});   
-    setCustomTagInput('');
-    
-    if (cat.autoOpenWarranty) {
-      setShowWarranty(true);
-    }
-  };
+  const activeCategory = categories.find(c => c.id === selectedCategoryId);
 
+  // Tag Logik
   const toggleTag = (tag: string) => {
     if (!selectedTags.includes(tag)) {
-      // Tag wird neu hinzugefügt
       setSelectedTags([...selectedTags, tag]);
-      // UX-Magie: Wenn der Name noch leer ist, nimm das Tag als Namen!
-      if (name.trim() === '') {
-        setName(tag);
-      }
+      if (name.trim() === '') setName(tag);
     } else {
-      // Tag wird wieder abgewählt
       setSelectedTags(selectedTags.filter(t => t !== tag));
     }
   };
@@ -100,100 +74,118 @@ function NewItemForm() {
   const handleAddCustomTag = (e: React.KeyboardEvent | React.FocusEvent) => {
     if ((e.type === 'keydown' && (e as React.KeyboardEvent).key !== 'Enter') || !customTagInput.trim()) return;
     e.preventDefault();
-    
     const newTag = customTagInput.trim();
     if (!selectedTags.includes(newTag)) {
       setSelectedTags([...selectedTags, newTag]);
-      // UX-Magie: Auch bei eigenen Tags den Namen füllen, wenn er leer ist
-      if (name.trim() === '') {
-        setName(newTag);
-      }
+      if (name.trim() === '') setName(newTag);
     }
     setCustomTagInput('');
   };
 
-  const handleImageClick = (e: React.MouseEvent<HTMLImageElement>) => {
-    const rect = e.currentTarget.getBoundingClientRect();
-    const x = ((e.clientX - rect.left) / rect.width) * 100;
-    const y = ((e.clientY - rect.top) / rect.height) * 100;
-    setTagX(x);
-    setTagY(y);
+  // 🪄 Smart-Link Funktion
+  const handleFetchUrlInfo = async () => {
+    if (!productUrl.trim() || !productUrl.startsWith('http')) {
+      alert("Bitte einen gültigen Link (inkl. https://) eingeben!");
+      return;
+    }
+    
+    setIsFetchingUrl(true);
+    try {
+      const res = await fetch('/api/fetch-meta', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: productUrl.trim() })
+      });
+      
+      const data = await res.json();
+      
+      if (data.title && name.trim() === '') {
+        let cleanTitle = data.title.split('|')[0].split('-')[0].trim();
+        setName(cleanTitle);
+      }
+      
+      if (data.imageUrl) {
+        setScrapedImageUrl(data.imageUrl);
+      }
+
+      if (!data.title && !data.imageUrl) {
+        alert("Konnte keine Daten von dieser Seite lesen.");
+      }
+    } catch (error) {
+      alert("Fehler beim Abrufen des Links.");
+    } finally {
+      setIsFetchingUrl(false);
+    }
   };
 
-  const activeCategory = categories.find(c => c.id === selectedCategoryId);
+  // 🔍 EAN-Auto-Suche Funktion
+  const handleEanSearch = async () => {
+    if (!ean.trim()) return;
+    setIsSearchingEan(true);
+    
+    try {
+      const res = await fetch('/api/search-ean', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ean: ean.trim(), shops: preferredShops })
+      });
+      
+      const data = await res.json();
+      
+      if (res.ok && data.url) {
+        setProductUrl(data.url); // Shop-URL eintragen
+        
+        if (data.title && name.trim() === '') {
+          let cleanTitle = data.title.split('|')[0].split('-')[0].trim();
+          setName(cleanTitle);
+        }
+        if (data.imageUrl) {
+          setScrapedImageUrl(data.imageUrl);
+        }
+      } else {
+        alert(data.error || "Kein Treffer in deinen Shops. Bitte manuell erfassen.");
+      }
+    } catch (error) {
+      alert("Fehler bei der Suche.");
+    } finally {
+      setIsSearchingEan(false);
+    }
+  };
 
-  const handleSubmit = async (e: React.FormEvent) => {
+  // Speichern
+  const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    if (!activeCategory) {
+    if (!activeCategory || !workspaceId) {
       alert("Bitte wähle eine Haupt-Kategorie aus!");
       return;
     }
 
     setIsSaving(true);
     try {
-      let receiptUrl = "";
-      if (showWarranty && receiptFile) {
-        const fileRef = ref(storage, `receipts/${Date.now()}_${receiptFile.name}`);
-        await uploadBytes(fileRef, receiptFile);
-        receiptUrl = await getDownloadURL(fileRef);
-      }
-
-      // 1. Speichert das Item in die Werkstatt
-      await addDoc(collection(db, 'workspaces', workspaceId!, 'items'), {
+      await addDoc(collection(db, 'workspaces', workspaceId, 'items'), {
         name,
         ean,
+        productUrl,
+        imageUrl: scrapedImageUrl,
         category: activeCategory.name, 
-        tags: selectedTags,            
-        attributes,                    
+        tags: selectedTags, 
         quantity,
         locationId,
         tagX,
         tagY,
-        price: showWarranty ? (Number(price) || 0) : null,
-        purchaseDate: showWarranty ? purchaseDate : null,
-        receiptUrl: showWarranty ? receiptUrl : null,
+        attributes,
         createdAt: new Date().toISOString()
       });
 
-      // 2. NEU: Die Selbstlern-Funktion (Ergänzt die Settings-Bibliothek)
-      // Wir filtern heraus, welche gewählten Tags noch NICHT in der Bibliothek stehen
-      const newCustomTags = selectedTags.filter(t => !(activeCategory.tags || []).includes(t));
-      
-      if (newCustomTags.length > 0) {
-        try {
-          const settingsRef = doc(db, 'workspaces', workspaceId!, 'settings', 'main');
-          const settingsSnap = await getDoc(settingsRef);
-          if (settingsSnap.exists()) {
-            const data = settingsSnap.data();
-            const updatedCategories = data.categories.map((c: any) => {
-              if (c.id === activeCategory.id) {
-                return {
-                  ...c,
-                  // Fügt die neuen Tags hinten an die bestehende Liste an
-                  tags: [...(c.tags || []), ...newCustomTags]
-                };
-              }
-              return c;
-            });
-            await updateDoc(settingsRef, { categories: updatedCategories });
-          }
-        } catch (settingsError) {
-          console.error("Fehler beim Erweitern der Tag-Bibliothek:", settingsError);
-          // Wir werfen hier keinen Alert, da das Haupt-Item ja erfolgreich gespeichert wurde.
-        }
-      }
-
-      router.push('/');
+      router.push('/'); 
     } catch (error) {
-      alert("Fehler beim Speichern.");
+      alert('Fehler beim Speichern.');
     } finally {
       setIsSaving(false);
     }
   };
 
-  const selectedLoc = locations.find(l => l.id === locationId);
-
-  if (isLoading) return <div className="min-h-screen bg-slate-50 flex items-center justify-center text-slate-500 font-medium">Lade Formular...</div>;
+  if (!workspaceId) return <div className="p-8 text-center text-slate-500">Lade...</div>;
 
   return (
     <div className="min-h-screen bg-slate-50 p-4 pb-32">
@@ -207,35 +199,107 @@ function NewItemForm() {
         </div>
         
         <form onSubmit={handleSubmit} className="space-y-6">
-          <div className="space-y-4">
+          
+          {/* ========================================= */}
+          {/* 🚀 DIE MAGISCHE AUTO-FILL ZONE            */}
+          {/* ========================================= */}
+          <div className="space-y-4 border-b border-slate-100 pb-6">
             
-            <div>
-              <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Bezeichnung</label>
-              <input type="text" value={name} onChange={(e) => setName(e.target.value)} className="w-full p-3 pr-10 border border-slate-300 rounded-xl bg-white text-slate-900 outline-none font-bold text-lg focus:border-orange-500 transition" placeholder="z.B. Makita Flex" required />
-              {name && (
-    <button 
-      type="button"
-      onClick={() => { setName(''); setSelectedTags([]); }}
-      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 font-bold"
-    >
-      ✕
-    </button>
-  )}
+            {/* 1. Smart-Link */}
+            <div className="bg-blue-50 p-4 rounded-xl border border-blue-100">
+              <label className="block text-[10px] font-bold text-blue-800 uppercase mb-2 flex items-center gap-2">
+                <span>🪄</span> Smart-Link (Shop-URL einfügen)
+              </label>
+              <div className="flex gap-2">
+                <input 
+                  type="url" 
+                  value={productUrl} 
+                  onChange={(e) => setProductUrl(e.target.value)} 
+                  placeholder="https://www.galaxus.ch/..." 
+                  className="flex-1 p-3 border border-blue-200 rounded-lg bg-white text-slate-900 outline-none text-sm focus:border-blue-500" 
+                />
+                <button 
+                  type="button" 
+                  onClick={handleFetchUrlInfo}
+                  disabled={isFetchingUrl || !productUrl}
+                  className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-bold transition disabled:opacity-50 whitespace-nowrap"
+                >
+                  {isFetchingUrl ? 'Sucht...' : 'Daten ziehen'}
+                </button>
+              </div>
+              
+              {scrapedImageUrl && (
+                <div className="mt-3 flex items-start gap-4 animate-fade-in">
+                  <div className="w-20 h-20 bg-white rounded-lg border border-blue-200 p-1 flex-shrink-0">
+                    <img src={scrapedImageUrl} alt="Vorschau" className="w-full h-full object-contain" />
+                  </div>
+                  <div className="flex-1">
+                    <p className="text-xs text-blue-800 font-bold">✅ Profi-Foto & Titel gefunden!</p>
+                    <p className="text-[10px] text-blue-600 mt-1">Das Bild wird automatisch als Artikelbild gespeichert.</p>
+                  </div>
+                </div>
+              )}
             </div>
 
-            {ean && (
-              <div className="flex items-center gap-3 bg-slate-50 p-3 rounded-xl border border-slate-200">
-                <span className="text-2xl">📦</span>
-                <div>
-                  <p className="text-[10px] text-slate-500 font-bold uppercase">Verknüpfter Barcode (EAN)</p>
-                  <p className="text-sm font-mono text-slate-700 font-bold">{ean}</p>
-                </div>
+            {/* 2. EAN Scanner */}
+            <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
+              <label className="block text-[10px] font-bold text-slate-500 uppercase mb-2 flex justify-between items-center">
+                <span className="flex items-center gap-2">📷 EAN / Barcode Scanner</span>
+                <span className="text-blue-500 font-medium">Auto-Suche in {preferredShops.length} Shops</span>
+              </label>
+              <div className="flex gap-2">
+                <input 
+                  type="text" 
+                  value={ean} 
+                  onChange={(e) => setEan(e.target.value)} 
+                  className="flex-1 p-3 border border-slate-300 rounded-lg bg-white text-slate-900 outline-none font-mono text-sm focus:border-slate-500 transition" 
+                  placeholder="z.B. 7611234567890" 
+                />
+                <button 
+                  type="button"
+                  onClick={handleEanSearch}
+                  disabled={!ean || isSearchingEan}
+                  className="bg-slate-800 hover:bg-slate-900 text-white px-4 py-2 rounded-lg text-sm font-bold transition disabled:opacity-50 flex items-center gap-2"
+                >
+                  {isSearchingEan ? 'Sucht...' : '🔍 Auto-Fill'}
+                </button>
               </div>
-            )}
+            </div>
+
+          </div>
+
+          {/* ========================================= */}
+          {/* 📝 MANUELLE EINGABE / KORREKTUR           */}
+          {/* ========================================= */}
+          <div className="space-y-4">
             
-            {/* 1. DYNAMISCHE KATEGORIE-AUSWAHL */}
+            {/* Bezeichnung mit X-Button */}
+            <div>
+              <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Bezeichnung</label>
+              <div className="relative">
+                <input 
+                  type="text" 
+                  value={name} 
+                  onChange={(e) => setName(e.target.value)} 
+                  className="w-full p-3 pr-10 border border-slate-300 rounded-xl bg-white text-slate-900 outline-none font-bold text-lg focus:border-orange-500 transition" 
+                  placeholder="z.B. Makita Flex" 
+                  required 
+                />
+                {name && (
+                  <button 
+                    type="button"
+                    onClick={() => { setName(''); setSelectedTags([]); }}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 w-8 h-8 flex items-center justify-center text-slate-400 hover:text-slate-600 font-bold rounded-full hover:bg-slate-100 transition"
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* KATEGORIEN & TAGS */}
             <div className="pt-2">
-              <label className="block text-[10px] font-bold text-slate-500 uppercase mb-2">Haupt-Kategorie wählen</label>
+              <label className="block text-[10px] font-bold text-slate-500 uppercase mb-2">Kategorie wählen</label>
               <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
                 {categories.map(cat => {
                   const isSelected = selectedCategoryId === cat.id;
@@ -243,7 +307,7 @@ function NewItemForm() {
                     <button
                       key={cat.id}
                       type="button"
-                      onClick={() => handleCategorySelect(cat)}
+                      onClick={() => { setSelectedCategoryId(cat.id); setCustomTagInput(''); }}
                       className={`p-3 rounded-xl border flex flex-col items-center gap-1.5 transition-all ${
                         isSelected 
                           ? 'bg-orange-50 border-orange-500 shadow-sm transform scale-[1.02]' 
@@ -260,13 +324,10 @@ function NewItemForm() {
               </div>
             </div>
 
-            {/* 2. DYNAMISCHE TAG-BIBLIOTHEK + CUSTOM TAGS */}
             {activeCategory && (
               <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl animate-fade-in">
-                <label className="block text-[10px] font-bold text-slate-500 uppercase mb-2">Spezifischer Typ</label>
+                <label className="block text-[10px] font-bold text-slate-500 uppercase mb-2">Tags</label>
                 <div className="flex flex-wrap gap-2 items-center">
-                  
-                  {/* Bibliothek-Tags */}
                   {activeCategory.tags?.map(tag => {
                     const isSelected = selectedTags.includes(tag);
                     return (
@@ -284,8 +345,6 @@ function NewItemForm() {
                       </button>
                     );
                   })}
-
-                  {/* Freitext-Tags (falls der User eigene in der Maske erstellt) */}
                   {selectedTags.filter(t => !activeCategory.tags?.includes(t)).map(customTag => (
                     <button
                       key={customTag}
@@ -296,8 +355,6 @@ function NewItemForm() {
                       ✓ {customTag}
                     </button>
                   ))}
-
-                  {/* Das Input-Feld für fehlende Tags */}
                   <input 
                     type="text" 
                     value={customTagInput}
@@ -311,115 +368,33 @@ function NewItemForm() {
               </div>
             )}
 
-            {/* 3. DYNAMISCHE ATTRIBUTE */}
-            {activeCategory && activeCategory.attributes && activeCategory.attributes.length > 0 && (
-              <div className="p-4 bg-purple-50 border border-purple-100 rounded-xl animate-fade-in">
-                <label className="block text-[10px] font-bold text-purple-800 uppercase mb-3 flex items-center gap-1">
-                  <span>⚙️</span> Spezifische Daten erfassen
-                </label>
-                <div className="grid grid-cols-2 gap-3">
-                  {activeCategory.attributes.map(attr => (
-                    <div key={attr}>
-                      <label className="block text-[10px] font-semibold text-purple-700 mb-1">{attr}</label>
-                      <input 
-                        type="text" 
-                        value={attributes[attr] || ''} 
-                        onChange={(e) => setAttributes({...attributes, [attr]: e.target.value})} 
-                        className="w-full p-2.5 bg-white border border-purple-200 rounded-lg text-sm outline-none focus:border-purple-500 text-slate-800 shadow-sm"
-                      />
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
             <div className="grid grid-cols-2 gap-4 pt-4 border-t border-slate-100 mt-4">
               <div>
                 <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Menge</label>
-                <input type="number" value={quantity} onChange={(e) => setQuantity(Number(e.target.value))} className="w-full p-3 border border-slate-300 rounded-xl bg-white text-slate-900 font-bold" />
+                <input type="number" min="1" value={quantity} onChange={(e) => setQuantity(Number(e.target.value))} className="w-full p-3 border border-slate-300 rounded-xl bg-white text-slate-900 font-bold" />
               </div>
               <div>
-                <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Lagerort</label>
-                <select value={locationId} onChange={(e) => { setLocationId(e.target.value); setTagX(null); setTagY(null); }} className="w-full p-3 border border-slate-300 rounded-xl bg-white text-slate-900 font-medium" required>
+                <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Lagerort (Optional)</label>
+                <select 
+                  value={locationId} 
+                  onChange={(e) => { setLocationId(e.target.value); setTagX(null); setTagY(null); }} 
+                  className="w-full p-3 border border-slate-300 rounded-xl bg-white text-slate-900 font-medium text-sm"
+                >
                   <option value="">-- Ort wählen --</option>
-                  {(() => {
-                    const buildTree = (parentId: string | null, depth: number): any[] => {
-                      let result: any[] = [];
-                      const children = locations.filter(l => (l.parentId || null) === parentId);
-                      children.forEach(child => {
-                        result.push({ ...child, depth });
-                        result = result.concat(buildTree(child.id, depth + 1));
-                      });
-                      return result;
-                    };
-                    return buildTree(null, 0).map(loc => (
-                      <option key={loc.id} value={loc.id}>
-                        {'\u00A0\u00A0\u00A0'.repeat(loc.depth)}{loc.depth > 0 ? '↳ ' : ''}{loc.name}
-                      </option>
-                    ));
-                  })()}
+                  {locations.map(loc => <option key={loc.id} value={loc.id}>{loc.name}</option>)}
                 </select>
               </div>
             </div>
 
-            {selectedLoc && selectedLoc.imageUrl && (
-              <div className="mt-4 p-4 bg-slate-50 border border-slate-200 rounded-xl animate-fade-in">
-                <p className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">Wo genau liegt es? (Klicke auf das Bild)</p>
-                <div className="relative inline-block border-2 border-slate-300 rounded-lg overflow-hidden shadow-sm w-full">
-                  <img 
-                    src={selectedLoc.imageUrl} 
-                    alt="Lagerort" 
-                    className="w-full h-auto cursor-crosshair" 
-                    onClick={handleImageClick}
-                  />
-                  {tagX !== null && tagY !== null && (
-                    <div 
-                      className="absolute w-6 h-6 bg-red-600 border-2 border-white rounded-full shadow-lg transform -translate-x-1/2 -translate-y-1/2 pointer-events-none transition-all"
-                      style={{ left: `${tagX}%`, top: `${tagY}%` }}
-                    />
-                  )}
-                </div>
-              </div>
-            )}
           </div>
 
-          <div className="flex items-center gap-2 px-1 border-t pt-6 mt-6">
-            <input type="checkbox" id="toggleWarranty" checked={showWarranty} onChange={(e) => setShowWarranty(e.target.checked)} className="w-5 h-5 rounded border-slate-300 text-orange-600 focus:ring-orange-500" />
-            <label htmlFor="toggleWarranty" className="text-sm font-semibold text-slate-700 cursor-pointer">🧾 Garantie-Tresor & Beleg</label>
+          <div className="pt-6">
+            <button type="submit" disabled={isSaving || !activeCategory} className="w-full bg-slate-900 text-white font-bold py-4 rounded-xl shadow-lg shadow-slate-200 disabled:opacity-50 transition hover:bg-slate-800 text-lg">
+              {isSaving ? 'Speichert...' : 'Erfassen'}
+            </button>
           </div>
-
-          {showWarranty && (
-            <div className="bg-orange-50 p-4 rounded-xl border border-orange-200 space-y-4 animate-fade-in">
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-[10px] font-bold text-orange-800 uppercase mb-1">Preis (CHF)</label>
-                  <input type="number" step="0.05" value={price} onChange={(e) => setPrice(e.target.value)} placeholder="0.00" className="w-full p-2.5 border border-orange-200 rounded-lg bg-white text-slate-900 outline-none focus:border-orange-500" />
-                </div>
-                <div>
-                  <label className="block text-[10px] font-bold text-orange-800 uppercase mb-1">Kaufdatum</label>
-                  <input type="date" value={purchaseDate} onChange={(e) => setPurchaseDate(e.target.value)} className="w-full p-2.5 border border-orange-200 rounded-lg bg-white text-slate-900 outline-none focus:border-orange-500" />
-                </div>
-              </div>
-              <div>
-                <label className="block text-[10px] font-bold text-orange-800 uppercase mb-1">Kassenbeleg fotografieren</label>
-                <input type="file" accept="image/*" capture="environment" onChange={(e) => e.target.files && setReceiptFile(e.target.files[0])} className="text-xs text-slate-600 w-full p-2 bg-white rounded-lg border border-orange-200" />
-              </div>
-            </div>
-          )}
-
-          <button type="submit" disabled={isSaving || !activeCategory} className="w-full bg-slate-900 text-white font-bold py-4 rounded-xl shadow-lg shadow-slate-200 disabled:opacity-50 mt-8 transition hover:bg-slate-800 text-lg">
-            {isSaving ? 'Wird gespeichert...' : 'Item in die Werkstatt legen'}
-          </button>
         </form>
       </div>
     </div>
-  );
-}
-
-export default function NewItem() {
-  return (
-    <Suspense fallback={<div className="min-h-screen bg-slate-50 flex items-center justify-center text-slate-500 font-medium">Lade Formular...</div>}>
-      <NewItemForm />
-    </Suspense>
   );
 }

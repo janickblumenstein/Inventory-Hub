@@ -227,7 +227,31 @@ export default function EditItem({ params }: { params: Promise<{ id: string }> }
             
             <div>
               <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Bezeichnung</label>
-              <input type="text" value={name} onChange={(e) => setName(e.target.value)} className="w-full p-3 border border-slate-300 rounded-xl bg-white text-slate-900 outline-none font-bold text-lg focus:border-orange-500 transition" required />
+              <div>
+              
+              
+              {/* NEU: Dieser relative Wrapper hält das Input und den X-Button zusammen */}
+              <div className="relative">
+                <input 
+                  type="text" 
+                  value={name} 
+                  onChange={(e) => setName(e.target.value)} 
+                  className="w-full p-3 pr-10 border border-slate-300 rounded-xl bg-white text-slate-900 outline-none font-bold text-lg focus:border-orange-500 transition" 
+                  placeholder="z.B. Makita Flex" 
+                  required 
+                />
+                
+                {name && (
+                  <button 
+                    type="button"
+                    onClick={() => { setName(''); setSelectedTags([]); }}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 w-8 h-8 flex items-center justify-center text-slate-400 hover:text-slate-600 font-bold rounded-full hover:bg-slate-100 transition"
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
+            </div>
             </div>
 
             <div className="pt-2">

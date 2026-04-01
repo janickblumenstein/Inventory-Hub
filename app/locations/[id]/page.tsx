@@ -2,7 +2,7 @@
 
 import { useEffect, useState, use } from 'react';
 import { db } from '../../../lib/firebase';
-import { doc, getDoc, collection, query, where, getDocs, writeBatch, updateDoc } from 'firebase/firestore'; // <-- updateDoc hinzugefügt!
+import { doc, getDoc, collection, query, where, getDocs, writeBatch, updateDoc } from 'firebase/firestore';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useWorkspace } from '../../../context/WorkspaceContext';
@@ -104,7 +104,6 @@ export default function LocationHub({ params }: { params: Promise<{ id: string }
   // 📍 MARKER-STUDIO LOGIK
   const openMarkerStudio = () => {
     setShowMarkerStudio(true);
-    // UX Magie: Finde sofort das erste Item, das noch keinen Marker hat
     const firstUnmarked = itemsInLocation.find(i => i.tagX === null || i.tagX === undefined);
     setActiveMarkerItemId(firstUnmarked ? firstUnmarked.id : (itemsInLocation[0]?.id || null));
   };
@@ -112,17 +111,14 @@ export default function LocationHub({ params }: { params: Promise<{ id: string }
   const handlePlaceMarker = async (e: React.MouseEvent<HTMLImageElement>) => {
     if (!activeMarkerItemId || !workspaceId) return;
 
-    // 1. Koordinaten berechnen
     const rect = e.currentTarget.getBoundingClientRect();
     const x = ((e.clientX - rect.left) / rect.width) * 100;
     const y = ((e.clientY - rect.top) / rect.height) * 100;
 
-    // 2. Sofortiges visuelles Feedback (Lokaler State aktualisieren)
     setItemsInLocation(prev => prev.map(item => 
       item.id === activeMarkerItemId ? { ...item, tagX: x, tagY: y } : item
     ));
 
-    // 3. Im Hintergrund in Firebase speichern
     try {
       await updateDoc(doc(db, 'workspaces', workspaceId, 'items', activeMarkerItemId), {
         tagX: x,
@@ -132,11 +128,8 @@ export default function LocationHub({ params }: { params: Promise<{ id: string }
       console.error("Fehler beim Speichern des Markers:", error);
     }
 
-    // 4. UX Magie: Auto-Advance zum nächsten Item ohne Marker!
     const currentIndex = itemsInLocation.findIndex(i => i.id === activeMarkerItemId);
-    // Suche ab dem aktuellen Index weiter
     const nextUnmarked = itemsInLocation.slice(currentIndex + 1).find(i => i.tagX === null || i.tagX === undefined) 
-                      // Falls hinten nichts ist, fang vorne wieder an zu suchen
                       || itemsInLocation.find(i => i.tagX === null || i.tagX === undefined); 
 
     if (nextUnmarked && nextUnmarked.id !== activeMarkerItemId) {
@@ -173,7 +166,6 @@ export default function LocationHub({ params }: { params: Promise<{ id: string }
                   <div className="relative rounded-xl overflow-hidden border-2 border-slate-200 shadow-inner group">
                     <img src={location.imageUrl} alt={location.name} className="w-full h-auto" />
                     
-                    {/* BUTTON ZUM ÖFFNEN DES MARKER-STUDIOS */}
                     <button 
                       onClick={openMarkerStudio}
                       disabled={itemsInLocation.length === 0}
@@ -184,7 +176,6 @@ export default function LocationHub({ params }: { params: Promise<{ id: string }
                       </span>
                     </button>
 
-                    {/* Zeige bestehende Marker als kleine Vorschau an */}
                     {itemsInLocation.map(item => {
                       if (item.tagX === null || item.tagX === undefined) return null;
                       return (
@@ -304,31 +295,32 @@ export default function LocationHub({ params }: { params: Promise<{ id: string }
         </div>
       </div>
 
-      {/* 📍 DAS FULLSCREEN MARKER-STUDIO */}
+      {/* 📍 DAS FULLSCREEN MARKER-STUDIO (MOBILE OPTIMIERT) */}
       {showMarkerStudio && (
-        <div className="fixed inset-0 z-50 bg-slate-900 flex flex-col md:flex-row animate-fade-in">
+        <div className="fixed inset-0 z-50 bg-slate-900 flex flex-col md:flex-row animate-fade-in h-[100dvh] overflow-hidden">
           
-          {/* Main Area: The Image */}
-          <div className="flex-1 relative bg-slate-950 flex flex-col">
-            <div className="p-4 flex justify-between items-center bg-slate-900 shadow-md z-10">
+          {/* Main Area: The Image (Schrumpft dynamisch) */}
+          <div className="flex-1 relative bg-slate-950 flex flex-col min-h-0">
+            <div className="p-3 md:p-4 flex justify-between items-center bg-slate-900 shadow-md z-10 flex-shrink-0">
               <div>
-                <h2 className="text-white font-bold text-lg flex items-center gap-2">📍 Marker-Studio</h2>
+                <h2 className="text-white font-bold text-base md:text-lg flex items-center gap-2">📍 Marker-Studio</h2>
                 <p className="text-slate-400 text-xs">{location.name}</p>
               </div>
               <button 
                 onClick={() => setShowMarkerStudio(false)}
-                className="bg-slate-800 hover:bg-slate-700 text-white px-4 py-2 rounded-lg text-sm font-bold transition"
+                className="bg-slate-800 hover:bg-slate-700 text-white px-3 py-1.5 md:px-4 md:py-2 rounded-lg text-sm font-bold transition"
               >
-                Schließen
+                Fertig
               </button>
             </div>
 
-            <div className="flex-1 overflow-auto p-4 md:p-8 flex items-center justify-center relative">
-              <div className="relative max-w-full max-h-full inline-block">
+            <div className="flex-1 p-2 md:p-8 flex items-center justify-center min-h-0 relative">
+              {/* Dieser Container umarmt das Bild exakt, damit die Prozente stimmen */}
+              <div className="relative inline-block" style={{ maxWidth: '100%', maxHeight: '100%' }}>
                 <img 
                   src={location.imageUrl} 
                   alt="Lagerort" 
-                  className="max-w-full max-h-[80vh] object-contain cursor-crosshair border-2 border-slate-800 rounded-lg shadow-2xl" 
+                  className="block max-w-full max-h-full cursor-crosshair border-2 border-slate-800 rounded-lg shadow-2xl" 
                   onClick={handlePlaceMarker}
                   draggable={false}
                 />
@@ -342,7 +334,7 @@ export default function LocationHub({ params }: { params: Promise<{ id: string }
                     <div 
                       key={`marker-${item.id}`}
                       onClick={(e) => {
-                        e.stopPropagation(); // Verhindert, dass der Marker neu gesetzt wird
+                        e.stopPropagation();
                         setActiveMarkerItemId(item.id);
                       }}
                       className={`absolute rounded-full border-2 border-white shadow-lg cursor-pointer transform -translate-x-1/2 -translate-y-1/2 transition-all ${
@@ -351,7 +343,6 @@ export default function LocationHub({ params }: { params: Promise<{ id: string }
                           : 'bg-green-500 w-4 h-4 z-10 opacity-70 hover:opacity-100 hover:scale-125'
                       }`}
                       style={{ left: `${item.tagX}%`, top: `${item.tagY}%` }}
-                      title={item.name}
                     />
                   );
                 })}
@@ -359,11 +350,11 @@ export default function LocationHub({ params }: { params: Promise<{ id: string }
             </div>
           </div>
 
-          {/* Sidebar: Item List */}
-          <div className="w-full md:w-80 bg-white flex flex-col h-[40vh] md:h-full shadow-[-10px_0_30px_rgba(0,0,0,0.5)] z-20">
-            <div className="p-4 bg-slate-50 border-b border-slate-200">
-              <h3 className="font-bold text-slate-800">Zu platzieren</h3>
-              <p className="text-[10px] text-slate-500 mt-1">Wähle ein Item und tippe auf das Bild. Die Liste springt automatisch weiter!</p>
+          {/* Sidebar: Item List (Feste Höhe auf Mobile, volle Höhe auf Desktop) */}
+          <div className="w-full h-[35vh] md:h-full md:w-80 bg-white flex flex-col flex-shrink-0 shadow-[0_-10px_30px_rgba(0,0,0,0.5)] md:shadow-[-10px_0_30px_rgba(0,0,0,0.5)] z-20">
+            <div className="p-3 bg-slate-50 border-b border-slate-200 flex-shrink-0">
+              <h3 className="font-bold text-slate-800 text-sm">Zu platzieren</h3>
+              <p className="text-[10px] text-slate-500 mt-0.5">Wähle ein Item und tippe auf das Bild.</p>
             </div>
             
             <div className="flex-1 overflow-y-auto p-2">
@@ -390,7 +381,7 @@ export default function LocationHub({ params }: { params: Promise<{ id: string }
                             {hasMarker ? '✅ Platziert' : '⏳ Wartet auf Marker'}
                           </p>
                         </div>
-                        <div className={`w-3 h-3 rounded-full border ${
+                        <div className={`w-3 h-3 rounded-full border flex-shrink-0 ${
                           hasMarker 
                             ? (isActive ? 'bg-orange-500 border-orange-600' : 'bg-green-500 border-green-600') 
                             : 'bg-slate-200 border-slate-300'

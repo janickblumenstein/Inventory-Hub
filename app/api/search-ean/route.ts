@@ -2,62 +2,68 @@ import { NextResponse } from 'next/server';
 
 export async function POST(request: Request) {
   try {
-    const { ean, shops } = await request.json();
+    const { ean } = await request.json();
 
     if (!ean) {
       return NextResponse.json({ error: 'Keine EAN übergeben' }, { status: 400 });
     }
 
-    // Wir bauen unsere geniale Shop-Begrenzung wieder selbst!
-    const siteQuery = shops.map((shop: string) => `site:${shop}`).join(' OR ');
-    const searchQuery = `${ean} ${siteQuery}`;
-
     const SERPER_API_KEY = process.env.SERPER_API_KEY?.trim(); 
 
     if (!SERPER_API_KEY) {
-        return NextResponse.json({ error: 'Serper API Key fehlt in der .env.local Datei!' }, { status: 500 });
+        return NextResponse.json({ error: 'Serper Key fehlt' }, { status: 500 });
     }
 
-    // Wir rufen die Serper API auf
-    const searchRes = await fetch('https://google.serper.dev/search', {
+    // 🚀 NEU: Wir nutzen den /shopping Endpunkt! 
+    // Hier sind EANs nativ hinterlegt, weil die Shops sie direkt an Google übermitteln.
+    const searchRes = await fetch('https://google.serper.dev/shopping', {
       method: 'POST',
       headers: {
         'X-API-KEY': SERPER_API_KEY,
         'Content-Type': 'application/json'
       },
       body: JSON.stringify({
-        q: searchQuery,
-        gl: 'ch', // Suchergebnisse auf die Schweiz priorisieren
-        hl: 'de'  // Deutsche Spracheinstellungen
+        q: ean, // Einfach die nackte Nummer
+        gl: 'ch', // Zwingend Schweiz
+        hl: 'de'  // Sprache Deutsch
       })
     });
     
     const searchData = await searchRes.json();
 
-    // Hat Serper etwas in seinen organischen Resultaten gefunden?
-    if (!searchData.organic || searchData.organic.length === 0) {
-        return NextResponse.json({ error: 'Kein Treffer! Zu dieser EAN wurde in deinen Shops nichts gefunden.' }, { status: 404 });
+    if (!searchData.shopping || searchData.shopping.length === 0) {
+        return NextResponse.json({ error: 'Nichts im Schweizer Google Shopping gefunden' }, { status: 404 });
     }
 
-    // Wir nehmen den ersten Treffer!
-    const firstResultUrl = searchData.organic[0].link;
-    const fallbackTitle = searchData.organic[0].title;
+    // Unsere präferierten Shops (in Kleinbuchstaben für den Abgleich)
+    const preferredShops = ['galaxus', 'hornbach', 'obi', 'brack'];
 
-    // Unseren bewährten Meta-Spion auf die gefundene URL ansetzen
-    const baseUrl = request.url.split('/api/')[0]; 
-    const metaRes = await fetch(`${baseUrl}/api/fetch-meta`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: firstResultUrl })
-    });
+    let bestResult = null;
 
-    const metaData = await metaRes.json();
+    // 1. Priorität: Suche in den Shopping-Resultaten nach unseren Lieblings-Shops
+    for (const item of searchData.shopping) {
+        const sourceName = item.source.toLowerCase();
+        // Prüfen, ob der Verkäufer (source) einer unserer Shops ist
+        if (preferredShops.some(shop => sourceName.includes(shop))) {
+            bestResult = item;
+            console.log(`Bingo! Gefunden bei deinem Lieblingsshop: ${item.source}`);
+            break; 
+        }
+    }
 
-    // Das perfekte Paket an die App zurückliefern
+    // 2. Fallback: Wenn keiner der Lieblings-Shops das Produkt hat, nehmen wir das allererste (z.B. Coop/Migros für Cola)
+    if (!bestResult) {
+        bestResult = searchData.shopping[0];
+        console.log(`Lieblingsshops hatten es nicht. Fallback auf: ${bestResult.source}`);
+    }
+
+    // Das Schöne an Google Shopping: Wir bekommen das hochauflösende Bild direkt mit! 
+    // Wir brauchen den Meta-Spion (fetch-meta) hier gar nicht mehr!
     return NextResponse.json({ 
-        url: firstResultUrl, 
-        title: metaData.title || fallbackTitle, 
-        imageUrl: metaData.imageUrl 
+        title: bestResult.title, 
+        imageUrl: bestResult.imageUrl,
+        url: bestResult.link,
+        source: bestResult.source // Speichern wir aus Spaß mit ab, damit du weisst, woher es kommt
     });
 
   } catch (error) {

@@ -16,27 +16,46 @@ export default function SuperScanner() {
   const [locations, setLocations] = useState<any[]>([]);
   const [selectedLocation, setSelectedLocation] = useState('');
   
-  // Da der html5-qrcode Scanner außerhalb des React-Lifecycles lebt, 
-  // müssen wir den ausgewählten Lagerort in einem Ref speichern, damit die Kamera ihn immer aktuell kennt!
+  // Ref-Trick für den Dropdown-Wert
   const selectedLocationRef = useRef(selectedLocation);
   useEffect(() => { selectedLocationRef.current = selectedLocation; }, [selectedLocation]);
 
   // UI States
   const [isProcessing, setIsProcessing] = useState(false);
+  // Ref-Trick für isProcessing, damit die Kamera nicht bei jedem Rerender neu startet!
+  const isProcessingRef = useRef(isProcessing);
+  useEffect(() => { isProcessingRef.current = isProcessing; }, [isProcessing]);
+
   const [toastMessage, setToastMessage] = useState<{text: string, type: 'success' | 'info' | 'error'} | null>(null);
   const [unknownEan, setUnknownEan] = useState<string | null>(null);
   
+  // DER KAMERA-RESTART-KEY
+  const [scannerKey, setScannerKey] = useState(0); 
+
   const scannerRef = useRef<Html5QrcodeScanner | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Lagerorte für das Dropdown laden
+  // Helper-Funktion: Lagerorte hierarchisch einrücken
+  const buildLocationTree = (locationsList: any[], parentId: string | null = null, level = 0): any[] => {
+    return locationsList
+      .filter(loc => (loc.parentId || null) === parentId)
+      .sort((a, b) => a.name.localeCompare(b.name))
+      .reduce((acc, loc) => {
+        const prefix = level > 0 ? '—'.repeat(level) + ' ' : '';
+        acc.push({ ...loc, displayName: prefix + loc.name });
+        acc.push(...buildLocationTree(locationsList, loc.id, level + 1));
+        return acc;
+      }, []);
+  };
+
+  // Lagerorte laden und formatieren
   useEffect(() => {
     if (!workspaceId) return;
     const fetchLocations = async () => {
       const locSnapshot = await getDocs(collection(db, 'workspaces', workspaceId, 'locations'));
-      const locs: any[] = [];
-      locSnapshot.forEach((doc) => { locs.push({ id: doc.id, ...doc.data() }); });
-      setLocations(locs);
+      const rawLocs: any[] = [];
+      locSnapshot.forEach((doc) => { rawLocs.push({ id: doc.id, ...doc.data() }); });
+      setLocations(buildLocationTree(rawLocs));
     };
     fetchLocations();
   }, [workspaceId]);
@@ -46,104 +65,103 @@ export default function SuperScanner() {
     setTimeout(() => setToastMessage(null), duration);
   };
 
-  // KAMERA INITIALISIERUNG
+  // KAMERA INITIALISIERUNG (Wird durch scannerKey komplett neu gestartet, wenn nötig)
   useEffect(() => {
     if (!workspaceId) return; 
 
-    if (!scannerRef.current) {
-      scannerRef.current = new Html5QrcodeScanner(
-        "reader", 
-        { fps: 10, qrbox: { width: 250, height: 250 }, rememberLastUsedCamera: true },
-        false
-      );
+    // Vorherige Instanz sauber aufräumen
+    if (scannerRef.current) {
+      scannerRef.current.clear().catch(e => console.error(e));
+      scannerRef.current = null;
+    }
 
-      scannerRef.current.render(
-        async (decodedText) => {
-          // Wenn wir gerade etwas verarbeiten oder ein Foto verlangen, ignoriere neue Scans
-          if (isProcessing) return; 
+    scannerRef.current = new Html5QrcodeScanner(
+      "reader", 
+      { fps: 10, qrbox: { width: 250, height: 250 }, rememberLastUsedCamera: true },
+      false
+    );
+
+    scannerRef.current.render(
+      async (decodedText) => {
+        // Nutzen den Ref, um React Re-Renders zu umgehen
+        if (isProcessingRef.current) return; 
+        
+        setIsProcessing(true);
+        setUnknownEan(null);
+        showToast("Prüfe Datenbank...", "info", 10000);
+
+        try {
+          // 1. IST ES EIN LAGERORT (QR-Code)?
+          const locQuery = query(collection(db, 'workspaces', workspaceId, 'locations'), where('code', '==', decodedText));
+          const locSnap = await getDocs(locQuery);
+          if (!locSnap.empty) {
+            scannerRef.current?.clear();
+            router.push(`/?scannedLoc=${locSnap.docs[0].id}`); 
+            return;
+          }
+
+          // 2. EXISTIERT DAS ITEM BEREITS?
+          const itemQ = query(collection(db, 'workspaces', workspaceId, 'items'), where('ean', '==', decodedText));
+          const querySnapshot = await getDocs(itemQ);
+          if (!querySnapshot.empty) {
+            scannerRef.current?.clear();
+            router.push(`/item/${querySnapshot.docs[0].id}/edit`); 
+            return;
+          }
+
+          // 3. FLIESSBAND-MODUS: NEUES ITEM IM NETZ SUCHEN!
+          showToast("Suche Produktdaten im Netz...", "info", 10000);
           
-          setIsProcessing(true);
-          setUnknownEan(null);
-          showToast("Prüfe Datenbank...", "info", 10000); // Bleibt stehen, bis wir fertig sind
+          const res = await fetch('/api/search-ean', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ ean: decodedText.trim() })
+          });
+          
+          const data = await res.json();
 
-          try {
-            // 1. IST ES EIN LAGERORT (QR-Code)?
-            const locQuery = query(collection(db, 'workspaces', workspaceId, 'locations'), where('code', '==', decodedText));
-            const locSnap = await getDocs(locQuery);
-            if (!locSnap.empty) {
-              const locId = locSnap.docs[0].id;
-              scannerRef.current?.clear();
-              router.push(`/?scannedLoc=${locId}`); 
-              return;
-            }
-
-            // 2. EXISTIERT DAS ITEM BEREITS?
-            const itemQ = query(collection(db, 'workspaces', workspaceId, 'items'), where('ean', '==', decodedText));
-            const querySnapshot = await getDocs(itemQ);
-            if (!querySnapshot.empty) {
-              const existingItem = querySnapshot.docs[0];
-              scannerRef.current?.clear();
-              router.push(`/item/${existingItem.id}/edit`); 
-              return;
-            }
-
-            // 3. FLIESSBAND-MODUS: NEUES ITEM IM NETZ SUCHEN!
-            showToast("Suche Produktdaten...", "info", 10000);
-            
-            const res = await fetch('/api/search-ean', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ ean: decodedText.trim(), shops: ["galaxus.ch", "hornbach.ch", "obi.ch", "brack.ch"] })
+          if (res.ok && data.title) {
+            // ERFOLG!
+            await addDoc(collection(db, 'workspaces', workspaceId, 'items'), {
+              name: data.title.split('|')[0].trim(),
+              ean: decodedText,
+              productUrl: data.url || '',
+              imageUrl: data.imageUrl || '',
+              category: '', 
+              quantity: 1,
+              locationId: selectedLocationRef.current,
+              createdAt: new Date().toISOString()
             });
             
-            const data = await res.json();
+            showToast(`✅ ${data.title.split('|')[0].substring(0, 25)}... gespeichert!`, 'success');
+            setTimeout(() => setIsProcessing(false), 2000);
 
-            if (res.ok && data.url) {
-              // ERFOLG! Blind in den Eingangskorb speichern
-              await addDoc(collection(db, 'workspaces', workspaceId, 'items'), {
-                name: data.title.split('|')[0].trim(),
-                ean: decodedText, // EAN für die spätere globale Datenbank speichern!
-                productUrl: data.url,
-                imageUrl: data.imageUrl,
-                category: '', // Bleibt leer = Eingangskorb!
-                quantity: 1,
-                locationId: selectedLocationRef.current, // Holt den aktuellen Dropdown-Wert
-                createdAt: new Date().toISOString()
-              });
-              
-              showToast(`✅ ${data.title.split('|')[0].substring(0, 25)}... gespeichert!`, 'success');
-              
-              // Kurze Pause, dann Kamera wieder scharf schalten für das nächste Item!
-              setTimeout(() => setIsProcessing(false), 2000);
-
-            } else {
-              // FEHLSCHLAG: Nichts gefunden. Wir brauchen ein Foto!
-              setUnknownEan(decodedText);
-              showToast(`❌ EAN unbekannt. Bitte knipse ein Foto!`, 'error', 5000);
-              setIsProcessing(false); // Kamera darf im Hintergrund weiterlaufen, aber UI blockiert
-            }
-
-          } catch (error) {
-            console.error("Fehler beim Prüfen:", error);
+          } else {
+            // FEHLSCHLAG: Kamera hat nichts gefunden
             setUnknownEan(decodedText);
-            showToast(`❌ Verbindungsfehler. Bitte knipse ein Foto!`, 'error', 5000);
-            setIsProcessing(false);
+            showToast(`❌ EAN unbekannt. Bitte knipse ein Foto!`, 'error', 5000);
+            setIsProcessing(false); 
           }
-        },
-        (error) => {
-          // Ignoriere die ständigen "Kein Barcode gefunden" Fehler des Scanners
+
+        } catch (error) {
+          setUnknownEan(decodedText);
+          showToast(`❌ Verbindungsfehler. Bitte knipse ein Foto!`, 'error', 5000);
+          setIsProcessing(false);
         }
-      );
-    }
+      },
+      (error) => {}
+    );
 
     return () => {
       if (scannerRef.current) {
         scannerRef.current.clear().catch(e => console.error(e));
+        scannerRef.current = null;
       }
     };
-  }, [workspaceId, router, isProcessing]);
+  // WICHTIG: scannerKey sorgt dafür, dass dieser Effekt nach einem Foto komplett neu läuft!
+  }, [workspaceId, router, scannerKey]); 
 
-  // FOTO-FALLBACK (Für Rasenmäher ODER unbekannte EANs)
+  // FOTO-FALLBACK
   const handlePhotoCapture = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !workspaceId) return;
@@ -158,7 +176,7 @@ export default function SuperScanner() {
 
       await addDoc(collection(db, 'workspaces', workspaceId, 'items'), {
         name: unknownEan ? `Unbekannt (${unknownEan})` : 'Neues Foto-Item',
-        ean: unknownEan || '', // Nimmt die EAN mit, falls wir vorhin eine gescannt haben
+        ean: unknownEan || '', 
         imageUrl: downloadUrl,
         category: '', 
         quantity: 1,
@@ -167,13 +185,24 @@ export default function SuperScanner() {
       });
 
       showToast(`✅ Foto gespeichert! Ab in den Korb.`, 'success');
-      setUnknownEan(null); // Reset, damit die Kamera wieder Barcodes annimmt
-      setTimeout(() => setIsProcessing(false), 2000);
+      setUnknownEan(null);
+      
+      // HIER PASSIERT DIE MAGIE: Wir zwingen die Kamera zum kompletten Reboot!
+      setTimeout(() => {
+        setIsProcessing(false);
+        setScannerKey(prev => prev + 1); 
+      }, 1500);
 
     } catch (error) {
       alert("Fehler beim Hochladen des Bildes.");
       setIsProcessing(false);
+      setScannerKey(prev => prev + 1); // Auch bei Fehler neustarten
     }
+  };
+
+  const cancelFallback = () => {
+    setUnknownEan(null);
+    setScannerKey(prev => prev + 1); // Reboot, um das Bild wieder live zu schalten
   };
 
   if (!workspaceId) return <div className="min-h-screen bg-slate-900 p-8 text-center text-white">Lade Scanner...</div>;
@@ -181,17 +210,17 @@ export default function SuperScanner() {
   return (
     <div className="min-h-screen bg-slate-900 text-white flex flex-col relative">
       
-      {/* 1. HEADER: Vorab-Zuweisung */}
+      {/* HEADER */}
       <div className="p-4 bg-slate-800 border-b border-slate-700 flex justify-between items-center z-20">
         <div className="flex-1">
           <label className="text-[10px] uppercase text-slate-400 font-bold block mb-1">Vorab-Zuweisung (Optional)</label>
           <select 
             value={selectedLocation}
             onChange={(e) => setSelectedLocation(e.target.value)}
-            className="w-full bg-slate-700 text-white text-sm p-2 rounded-lg border border-slate-600 outline-none focus:border-orange-500"
+            className="w-full bg-slate-700 text-white text-sm p-2 rounded-lg border border-slate-600 outline-none focus:border-orange-500 font-mono"
           >
             <option value="">Lagerort: Nicht zugewiesen</option>
-            {locations.map(loc => <option key={loc.id} value={loc.id}>{loc.name}</option>)}
+            {locations.map(loc => <option key={loc.id} value={loc.id}>{loc.displayName}</option>)}
           </select>
         </div>
         <Link href="/" className="ml-4 w-10 h-10 bg-slate-700 rounded-full flex items-center justify-center text-xl hover:bg-slate-600 transition">
@@ -199,7 +228,7 @@ export default function SuperScanner() {
         </Link>
       </div>
 
-      {/* 2. TOAST MELDUNGEN */}
+      {/* TOAST MELDUNGEN */}
       {toastMessage && (
         <div className={`absolute top-24 left-1/2 -translate-x-1/2 px-6 py-3 rounded-full shadow-2xl font-bold text-sm z-50 whitespace-nowrap border ${
           toastMessage.type === 'success' ? 'bg-green-500/90 border-green-400 text-white' : 
@@ -210,17 +239,17 @@ export default function SuperScanner() {
         </div>
       )}
 
-      {/* 3. KAMERA BEREICH */}
+      {/* KAMERA BEREICH */}
       <div className="flex-1 relative flex flex-col items-center justify-center bg-black">
         
-        {/* Der html5-qrcode Container */}
-        <div className="w-full max-w-md overflow-hidden rounded-3xl relative z-10">
+        {/* Der Scanner-Container nutzt den scannerKey, um nach einem Foto komplett neu gerendert zu werden */}
+        <div key={scannerKey} className="w-full max-w-md overflow-hidden rounded-3xl relative z-10">
            <div id="reader" className="w-full bg-black"></div>
         </div>
 
         {/* Overlay, wenn unbekannte EAN oder Upload lädt */}
         {(unknownEan || (isProcessing && !unknownEan)) && (
-          <div className="absolute inset-0 bg-slate-900/80 backdrop-blur-sm z-20 flex flex-col items-center justify-center p-6 text-center">
+          <div className="absolute inset-0 bg-slate-900/90 backdrop-blur-md z-20 flex flex-col items-center justify-center p-6 text-center">
             {unknownEan ? (
               <div className="animate-fade-in">
                 <div className="text-5xl mb-4">📸</div>
@@ -239,7 +268,7 @@ export default function SuperScanner() {
         )}
       </div>
 
-      {/* 4. BOTTOM CONTROLS (Foto knipsen) */}
+      {/* BOTTOM CONTROLS */}
       <div className="p-8 bg-slate-800 flex flex-col items-center pb-12 z-20">
         <input 
           type="file" 
@@ -262,13 +291,12 @@ export default function SuperScanner() {
           {unknownEan ? 'Foto als Fallback machen' : 'Ohne Barcode knipsen'}
         </p>
         
-        {/* Abbruch-Button, wenn wir im EAN-Fallback stecken */}
         {unknownEan && (
           <button 
-            onClick={() => setUnknownEan(null)}
+            onClick={cancelFallback}
             className="mt-6 text-sm text-slate-500 underline"
           >
-            Abbrechen & weiter scannen
+            Abbrechen & Kamera neu starten
           </button>
         )}
       </div>

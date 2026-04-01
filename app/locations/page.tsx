@@ -187,7 +187,7 @@ export default function LocationsManager() {
 
               <div className="flex gap-1">
                 {/* NEU: Der Bearbeiten-Button */}
-                <Link href={`/locations/${loc.id}/edit`} className="text-slate-400 hover:text-orange-600 p-2 transition text-lg" title="Bearbeiten">✏️</Link>
+                <Link href={`/locations/${loc.id}`} className="text-slate-400 hover:text-orange-600 p-2 transition text-lg" title="Bearbeiten">✏️</Link>
                 <button onClick={() => handlePrint(loc)} className="text-slate-400 hover:text-slate-800 p-2 transition text-lg" title="Etikett drucken">🖨️</button>
                 <button onClick={() => handleDelete(loc.id)} className="text-slate-300 hover:text-red-500 p-2 transition text-lg" title="Löschen">🗑️</button>
               </div>

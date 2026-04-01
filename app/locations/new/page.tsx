@@ -92,18 +92,7 @@ export default function NewLocation() {
         </div>
         
         <form onSubmit={handleSave} className="space-y-6">
-          <div>
-            <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Name des Ortes</label>
-            <input 
-              type="text" 
-              value={name} 
-              onChange={(e) => setName(e.target.value)} 
-              // Darkmode fixiert:
-              className="w-full p-3 bg-white border border-slate-300 rounded-xl text-slate-900 placeholder-slate-400 font-bold outline-none focus:border-orange-500 transition" 
-              placeholder="z.B. Kellerraum 1 oder Roter Metallschrank"
-              required 
-            />
-          </div>
+          
 
           <div>
              <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Befindet sich dieser Ort IN einem anderen?</label>

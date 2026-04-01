@@ -100,17 +100,29 @@ export default function EditItem({ params }: { params: Promise<{ id: string }> }
   };
 
   const toggleTag = (tag: string) => {
-    setSelectedTags(prev => 
-      prev.includes(tag) ? prev.filter(t => t !== tag) : [...prev, tag]
-    );
+    if (!selectedTags.includes(tag)) {
+      // Tag wird neu hinzugefügt
+      setSelectedTags([...selectedTags, tag]);
+      // UX-Magie: Wenn der Name noch leer ist, nimm das Tag als Namen!
+      if (name.trim() === '') {
+        setName(tag);
+      }
+    } else {
+      // Tag wird wieder abgewählt
+      setSelectedTags(selectedTags.filter(t => t !== tag));
+    }
   };
-
   const handleAddCustomTag = (e: React.KeyboardEvent | React.FocusEvent) => {
     if ((e.type === 'keydown' && (e as React.KeyboardEvent).key !== 'Enter') || !customTagInput.trim()) return;
     e.preventDefault();
+    
     const newTag = customTagInput.trim();
     if (!selectedTags.includes(newTag)) {
       setSelectedTags([...selectedTags, newTag]);
+      // UX-Magie: Auch bei eigenen Tags den Namen füllen, wenn er leer ist
+      if (name.trim() === '') {
+        setName(newTag);
+      }
     }
     setCustomTagInput('');
   };

@@ -84,17 +84,30 @@ function NewItemForm() {
   };
 
   const toggleTag = (tag: string) => {
-    setSelectedTags(prev => 
-      prev.includes(tag) ? prev.filter(t => t !== tag) : [...prev, tag]
-    );
+    if (!selectedTags.includes(tag)) {
+      // Tag wird neu hinzugefügt
+      setSelectedTags([...selectedTags, tag]);
+      // UX-Magie: Wenn der Name noch leer ist, nimm das Tag als Namen!
+      if (name.trim() === '') {
+        setName(tag);
+      }
+    } else {
+      // Tag wird wieder abgewählt
+      setSelectedTags(selectedTags.filter(t => t !== tag));
+    }
   };
 
   const handleAddCustomTag = (e: React.KeyboardEvent | React.FocusEvent) => {
     if ((e.type === 'keydown' && (e as React.KeyboardEvent).key !== 'Enter') || !customTagInput.trim()) return;
     e.preventDefault();
+    
     const newTag = customTagInput.trim();
     if (!selectedTags.includes(newTag)) {
       setSelectedTags([...selectedTags, newTag]);
+      // UX-Magie: Auch bei eigenen Tags den Namen füllen, wenn er leer ist
+      if (name.trim() === '') {
+        setName(newTag);
+      }
     }
     setCustomTagInput('');
   };
@@ -198,7 +211,16 @@ function NewItemForm() {
             
             <div>
               <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Bezeichnung</label>
-              <input type="text" value={name} onChange={(e) => setName(e.target.value)} className="w-full p-3 border border-slate-300 rounded-xl bg-white text-slate-900 outline-none font-bold text-lg focus:border-orange-500 transition" placeholder="z.B. Makita Flex" required />
+              <input type="text" value={name} onChange={(e) => setName(e.target.value)} className="w-full p-3 pr-10 border border-slate-300 rounded-xl bg-white text-slate-900 outline-none font-bold text-lg focus:border-orange-500 transition" placeholder="z.B. Makita Flex" required />
+              {name && (
+    <button 
+      type="button"
+      onClick={() => { setName(''); setSelectedTags([]); }}
+      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 font-bold"
+    >
+      ✕
+    </button>
+  )}
             </div>
 
             {ean && (

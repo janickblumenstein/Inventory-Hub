@@ -7,8 +7,10 @@ import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import type { CategoryConfig } from '../settings/page'; 
+import { useWorkspace } from '../../context/WorkspaceContext';
 
 function NewItemForm() {
+  const { workspaceId } = useWorkspace();
   const router = useRouter();
   
   const searchParams = useSearchParams();
@@ -42,6 +44,7 @@ function NewItemForm() {
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
+    if (!workspaceId) return;
     // URL Parameter Fallback
     const params = new URLSearchParams(window.location.search);
     const fallbackEan = params.get('ean');
@@ -51,12 +54,12 @@ function NewItemForm() {
 
     const fetchData = async () => {
       try {
-        const locSnapshot = await getDocs(collection(db, 'locations'));
+        const locSnapshot = await getDocs(collection(db, 'workspaces', workspaceId!, 'locations'));
         const locs: any[] = [];
         locSnapshot.forEach((doc) => { locs.push({ id: doc.id, ...doc.data() }); });
         setLocations(locs);
 
-        const settingsSnap = await getDoc(doc(db, 'settings', 'main'));
+        const settingsSnap = await getDoc(doc(db, 'workspaces', workspaceId!, 'settings', 'main'));
         if (settingsSnap.exists() && settingsSnap.data().categories) {
           setCategories(settingsSnap.data().categories);
         }
@@ -123,7 +126,7 @@ function NewItemForm() {
       }
 
       // 1. Speichert das Item in die Werkstatt
-      await addDoc(collection(db, 'items'), {
+      await addDoc(collection(db, 'workspaces', workspaceId!, 'items'), {
         name,
         ean,
         category: activeCategory.name, 
@@ -145,7 +148,7 @@ function NewItemForm() {
       
       if (newCustomTags.length > 0) {
         try {
-          const settingsRef = doc(db, 'settings', 'main');
+          const settingsRef = doc(db, 'workspaces', workspaceId!, 'settings', 'main');
           const settingsSnap = await getDoc(settingsRef);
           if (settingsSnap.exists()) {
             const data = settingsSnap.data();

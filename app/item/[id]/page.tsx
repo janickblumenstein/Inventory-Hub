@@ -5,8 +5,10 @@ import { db } from '../../../lib/firebase';
 import { doc, getDoc, updateDoc, collection, addDoc, query, where, getDocs } from 'firebase/firestore';
 import Link from 'next/link';
 import QRCode from 'react-qr-code';
+import { useWorkspace } from '../../../context/WorkspaceContext';
 
 export default function ItemDetail({ params }: { params: Promise<{ id: string }> }) {
+  const { workspaceId } = useWorkspace();
   const resolvedParams = use(params);
   const id = resolvedParams.id;
 
@@ -29,28 +31,28 @@ export default function ItemDetail({ params }: { params: Promise<{ id: string }>
   const fetchItemAndLoans = async () => {
     try {
       // 1. Item laden
-      const itemRef = doc(db, 'items', id);
+      const itemRef = doc(db, 'workspaces', workspaceId!, 'items', id);
       const itemSnap = await getDoc(itemRef);
 
       if (itemSnap.exists()) {
         const itemData = itemSnap.data();
         setItem({ id: itemSnap.id, ...itemData });
 
-        // Lagerort laden
+        // Lagerort laden (FIX: Aus dem Workspace laden!)
         if (itemData.locationId) {
-          const locRef = doc(db, 'locations', itemData.locationId);
+          const locRef = doc(db, 'workspaces', workspaceId!, 'locations', itemData.locationId);
           const locSnap = await getDoc(locRef);
           if (locSnap.exists()) setLocation({ id: locSnap.id, ...locSnap.data() });
         }
       }
 
       // 2. Aktive Ausleihen laden
-      const loansQuery = query(collection(db, 'loans'), where('itemId', '==', id), where('status', '==', 'active'));
+      const loansQuery = query(collection(db, 'workspaces', workspaceId!, 'loans'), where('itemId', '==', id), where('status', '==', 'active'));
       const loansSnap = await getDocs(loansQuery);
       setActiveLoans(loansSnap.docs.map(d => ({ id: d.id, ...d.data() })));
 
       // 3. Settings laden
-      const settingsSnap = await getDoc(doc(db, 'settings', 'main'));
+      const settingsSnap = await getDoc(doc(db, 'workspaces', workspaceId!, 'settings', 'main'));
       if (settingsSnap.exists()) {
         const data = settingsSnap.data();
         setOwnerName(data.ownerName || 'ShedSync');
@@ -69,8 +71,9 @@ export default function ItemDetail({ params }: { params: Promise<{ id: string }>
   };
 
   useEffect(() => {
+    if (!workspaceId) return;
     fetchItemAndLoans();
-  }, [id]);
+  }, [id, workspaceId]); // FIX: workspaceId als Abhängigkeit
 
   const handleShareToShoppingList = async () => {
     if (!item) return;
@@ -84,14 +87,15 @@ export default function ItemDetail({ params }: { params: Promise<{ id: string }>
   };
 
   const changeQuantity = async (amount: number) => {
-    if (!item) return;
+    if (!item || !workspaceId) return;
     const currentQty = Number(item.quantity) || 0;
     const newQty = currentQty + amount;
     if (newQty < 0) return;
 
     setIsUpdating(true);
     try {
-      await updateDoc(doc(db, 'items', item.id), { quantity: newQty });
+      // FIX: Im Workspace speichern!
+      await updateDoc(doc(db, 'workspaces', workspaceId, 'items', item.id), { quantity: newQty });
       setItem({ ...item, quantity: newQty });
     } catch (error) {
       alert("Fehler beim Speichern.");
@@ -102,11 +106,10 @@ export default function ItemDetail({ params }: { params: Promise<{ id: string }>
 
   const handleLendItem = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!borrowerName.trim() || loanQty <= 0) return;
+    if (!borrowerName.trim() || loanQty <= 0 || !workspaceId) return;
 
     setIsUpdating(true);
     try {
-      // 1. Wir speichern die Daten zuerst in einer Variable
       const newLoanData = {
         itemId: item.id,
         itemName: item.name,
@@ -117,20 +120,16 @@ export default function ItemDetail({ params }: { params: Promise<{ id: string }>
         status: 'active'
       };
 
-      // 2. In Firebase speichern
-      const docRef = await addDoc(collection(db, 'loans'), newLoanData);
+      const docRef = await addDoc(collection(db, 'workspaces', workspaceId, 'loans'), newLoanData);
       
       setBorrowerName('');
       setLoanQty(1);
       setExpectedReturn('');
       setShowLoanForm(false);
-      fetchItemAndLoans(); // Liste aktualisieren
+      fetchItemAndLoans(); 
 
-      // 3. NEU: Der automatische Druck-Dialog!
-      // Wir warten kurz (300ms), damit das Menü sich weich schließt, bevor das Pop-up kommt
       setTimeout(() => {
         if (window.confirm(`Erfolgreich an ${newLoanData.borrowerName} verliehen!\n\n🖨️ Möchtest du jetzt direkt das Verleih-Etikett für den Koffer drucken?`)) {
-          // Wir übergeben die Daten direkt an den Drucker
           handlePrintLoan({ id: docRef.id, ...newLoanData });
         }
       }, 300);
@@ -143,9 +142,11 @@ export default function ItemDetail({ params }: { params: Promise<{ id: string }>
   };
 
   const handleReturnItem = async (loanId: string) => {
+    if (!workspaceId) return;
     setIsUpdating(true);
     try {
-      await updateDoc(doc(db, 'loans', loanId), { 
+      // FIX: Im Workspace speichern!
+      await updateDoc(doc(db, 'workspaces', workspaceId, 'loans', loanId), { 
         status: 'returned',
         returnedDate: new Date().toISOString()
       });
@@ -176,7 +177,7 @@ export default function ItemDetail({ params }: { params: Promise<{ id: string }>
     return { isValid, endDate: warrantyEnd.toLocaleDateString('de-CH'), daysLeft: diffDays };
   };
 
-  if (loading) return <div className="p-8 text-center text-slate-500 animate-pulse">Lade Daten...</div>;
+  if (loading || !workspaceId) return <div className="p-8 text-center text-slate-500 animate-pulse">Lade Daten...</div>;
   if (!item) return <div className="p-8 text-center text-red-500">Item existiert nicht.</div>;
 
   const warranty = item.purchaseDate ? checkWarranty(item.purchaseDate) : null;
@@ -248,52 +249,51 @@ export default function ItemDetail({ params }: { params: Promise<{ id: string }>
                 </div>
 
                 {/* Verleih-Formular */}
-            {/* Verleih-Formular */}
-            {showLoanForm && (
-              <form onSubmit={handleLendItem} className="p-4 bg-white border-b border-blue-50 space-y-3 animate-fade-in">
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  <div className="sm:col-span-2">
-                    <label className="text-[10px] text-slate-500 uppercase font-bold">Wer bekommt es?</label>
-                    <input 
-                      type="text" 
-                      value={borrowerName} 
-                      onChange={e => setBorrowerName(e.target.value)} 
-                      placeholder="Name (z.B. Peter)" 
-                      className="w-full p-2 border border-slate-300 rounded-lg bg-white text-slate-900 placeholder-slate-400 outline-none text-sm font-medium focus:border-blue-500" 
-                      required 
-                      autoFocus 
-                    />
-                  </div>
-                  {totalQty > 1 && (
+                {showLoanForm && (
+                  <form onSubmit={handleLendItem} className="p-4 bg-white border-b border-blue-50 space-y-3 animate-fade-in">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      <div className="sm:col-span-2">
+                        <label className="text-[10px] text-slate-500 uppercase font-bold">Wer bekommt es?</label>
+                        <input 
+                          type="text" 
+                          value={borrowerName} 
+                          onChange={e => setBorrowerName(e.target.value)} 
+                          placeholder="Name (z.B. Peter)" 
+                          className="w-full p-2 border border-slate-300 rounded-lg bg-white text-slate-900 placeholder-slate-400 outline-none text-sm font-medium focus:border-blue-500" 
+                          required 
+                          autoFocus 
+                        />
+                      </div>
+                      {totalQty > 1 && (
+                        <div>
+                          <label className="text-[10px] text-slate-500 uppercase font-bold">Menge</label>
+                          <input 
+                            type="number" 
+                            min="1" 
+                            max={availableQty} 
+                            value={loanQty} 
+                            onChange={e => setLoanQty(Number(e.target.value))} 
+                            className="w-full p-2 border border-slate-300 rounded-lg bg-white text-slate-900 placeholder-slate-400 outline-none text-sm font-medium focus:border-blue-500" 
+                            required 
+                          />
+                        </div>
+                      )}
+                    </div>
                     <div>
-                      <label className="text-[10px] text-slate-500 uppercase font-bold">Menge</label>
+                      <label className="text-[10px] text-slate-500 uppercase font-bold">Rückgabe erwartet am (Optional)</label>
                       <input 
-                        type="number" 
-                        min="1" 
-                        max={availableQty} 
-                        value={loanQty} 
-                        onChange={e => setLoanQty(Number(e.target.value))} 
+                        type="date" 
+                        value={expectedReturn} 
+                        onChange={e => setExpectedReturn(e.target.value)} 
                         className="w-full p-2 border border-slate-300 rounded-lg bg-white text-slate-900 placeholder-slate-400 outline-none text-sm font-medium focus:border-blue-500" 
-                        required 
                       />
                     </div>
-                  )}
-                </div>
-                <div>
-                  <label className="text-[10px] text-slate-500 uppercase font-bold">Rückgabe erwartet am (Optional)</label>
-                  <input 
-                    type="date" 
-                    value={expectedReturn} 
-                    onChange={e => setExpectedReturn(e.target.value)} 
-                    className="w-full p-2 border border-slate-300 rounded-lg bg-white text-slate-900 placeholder-slate-400 outline-none text-sm font-medium focus:border-blue-500" 
-                  />
-                </div>
-                <div className="flex gap-2 pt-2">
-                  <button type="submit" disabled={isUpdating} className="flex-1 bg-blue-600 text-white text-sm font-bold py-2 rounded-lg hover:bg-blue-700 transition shadow-sm">Jetzt verleihen</button>
-                  <button type="button" onClick={() => setShowLoanForm(false)} className="px-4 bg-slate-100 text-slate-600 text-sm font-bold rounded-lg hover:bg-slate-200 transition">Abbrechen</button>
-                </div>
-              </form>
-            )}
+                    <div className="flex gap-2 pt-2">
+                      <button type="submit" disabled={isUpdating} className="flex-1 bg-blue-600 text-white text-sm font-bold py-2 rounded-lg hover:bg-blue-700 transition shadow-sm">Jetzt verleihen</button>
+                      <button type="button" onClick={() => setShowLoanForm(false)} className="px-4 bg-slate-100 text-slate-600 text-sm font-bold rounded-lg hover:bg-slate-200 transition">Abbrechen</button>
+                    </div>
+                  </form>
+                )}
 
                 <div className="bg-white">
                   {activeLoans.length === 0 && !showLoanForm ? (

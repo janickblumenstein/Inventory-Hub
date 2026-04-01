@@ -2,10 +2,17 @@
 
 import { useEffect, useState, useMemo } from 'react';
 import { db } from '../lib/firebase';
-import { collection, getDocs, orderBy, query, writeBatch, doc, getDoc } from 'firebase/firestore';
+import { collection, getDocs, orderBy, query, writeBatch, doc, getDoc, setDoc } from 'firebase/firestore';
 import Link from 'next/link';
+import { useWorkspace } from '../context/WorkspaceContext'; // <--- NEU: Wir holen uns den Wächter
 
 export default function Dashboard() {
+  // 1. WORKSPACE LOGIK
+  const { workspaceId, setWorkspaceId, isLoading: isWorkspaceLoading } = useWorkspace();
+  const [loginInput, setLoginInput] = useState('');
+  const [isMigrating, setIsMigrating] = useState(false);
+
+  // 2. DASHBOARD STATES
   const [items, setItems] = useState<any[]>([]);
   const [locations, setLocations] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -20,24 +27,29 @@ export default function Dashboard() {
   const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(new Set());
   const [scannedLocationFilter, setScannedLocationFilter] = useState<string | null>(null);
 
-  // Bulk-States
   const [isBulkUpdating, setIsBulkUpdating] = useState(false);
   const [bulkAction, setBulkAction] = useState<'location' | 'category' | 'addTag' | 'removeTag' | 'delete' | null>(null);
   const [bulkInputValue, setBulkInputValue] = useState('');
 
+  // 3. DATEN LADEN (Achtung: Neue Pfade!)
   const fetchData = async () => {
+    if (!workspaceId) return; // Stopp, wenn wir nicht eingeloggt sind
+    
     setLoading(true);
     try {
-      const locSnap = await getDocs(collection(db, 'locations'));
+      // Pfade sind jetzt: workspaces -> [ID] -> locations/items/settings
+      const workspaceRef = doc(db, 'workspaces', workspaceId);
+
+      const locSnap = await getDocs(collection(workspaceRef, 'locations'));
       const locList = locSnap.docs.map(d => ({ id: d.id, ...d.data() }));
       setLocations(locList);
       
-      const settingsSnap = await getDoc(doc(db, 'settings', 'main'));
+      const settingsSnap = await getDoc(doc(workspaceRef, 'settings', 'main'));
       if (settingsSnap.exists() && settingsSnap.data().categories) {
         setCategories(settingsSnap.data().categories);
       }
 
-      const itemsQuery = query(collection(db, 'items'), orderBy('createdAt', 'desc'));
+      const itemsQuery = query(collection(workspaceRef, 'items'), orderBy('createdAt', 'desc'));
       const itemsSnap = await getDocs(itemsQuery);
       
       const fetchedItems = itemsSnap.docs.map(document => {
@@ -53,35 +65,79 @@ export default function Dashboard() {
       });
       setExpandedGroups({});
     } catch (error) {
-      console.error("Fehler:", error);
+      console.error("Fehler beim Laden der Workspace-Daten:", error);
     } finally {
       setLoading(false);
     }
   };
 
-  useEffect(() => { 
-    fetchData(); 
-    
-    const params = new URLSearchParams(window.location.search);
-    const scannedLoc = params.get('scannedLoc');
-    if (scannedLoc) {
-      setScannedLocationFilter(scannedLoc);
-      setGroupBy('location'); 
+  useEffect(() => {
+    if (!workspaceId) return; 
+    if (workspaceId) {
+      fetchData(); 
+      
+      const params = new URLSearchParams(window.location.search);
+      const scannedLoc = params.get('scannedLoc');
+      if (scannedLoc) {
+        setScannedLocationFilter(scannedLoc);
+        setGroupBy('location'); 
+      }
     }
-  }, []);
+  }, [workspaceId]);
 
-  // Alle Tags der gesamten Werkstatt (für den Filter & Autocomplete)
+  // ==========================================
+  // MIGRATIONS-SKRIPT (NUR EINMALIG BENUTZEN!)
+  // ==========================================
+  const handleMigration = async () => {
+    if (!workspaceId) return;
+    if (!confirm("🚨 ACHTUNG: Möchtest du wirklich alle alten Daten aus dem Hauptverzeichnis in diesen Workspace kopieren? Mache das nur 1x!")) return;
+    
+    setIsMigrating(true);
+    try {
+      const targetWorkspace = doc(db, 'workspaces', workspaceId);
+      const batch = writeBatch(db);
+      
+      // 1. Items kopieren
+      const oldItems = await getDocs(collection(db, 'workspaces', workspaceId!, 'items'));
+      oldItems.forEach(docSnap => {
+        const newRef = doc(collection(targetWorkspace, 'items'), docSnap.id);
+        batch.set(newRef, docSnap.data());
+      });
+
+      // 2. Locations kopieren
+      const oldLocs = await getDocs(collection(db, 'workspaces', workspaceId!, 'locations'));
+      oldLocs.forEach(docSnap => {
+        const newRef = doc(collection(targetWorkspace, 'locations'), docSnap.id);
+        batch.set(newRef, docSnap.data());
+      });
+
+      // 3. Settings kopieren
+      const oldSettings = await getDoc(doc(db, 'workspaces', workspaceId!, 'settings', 'main'));
+      if (oldSettings.exists()) {
+        batch.set(doc(targetWorkspace, 'settings', 'main'), oldSettings.data());
+      }
+
+      await batch.commit();
+      alert("✅ Migration erfolgreich! Lade Seite neu...");
+      fetchData();
+    } catch (e) {
+      console.error(e);
+      alert("Fehler bei der Migration.");
+    } finally {
+      setIsMigrating(false);
+    }
+  };
+
+  // ... (Ab hier bleibt deine gesamte Logik für Memos, Filter und BulkEdit unangetastet, 
+  // ABER wir müssen im BulkEdit die Pfade anpassen!) ...
+
   const availableTags = useMemo(() => {
     const tags = new Set<string>();
     items.forEach(item => { if (item.tags) item.tags.forEach((t: string) => tags.add(t)); });
-    
-    // NEU: Aktive Filter-Tags IMMER anzeigen, damit der Button nicht verschwindet!
     selectedFilterTags.forEach(t => tags.add(t));
-    
     return Array.from(tags).sort();
-  }, [items, selectedFilterTags]); // Wichtig: selectedFilterTags als Abhängigkeit hinzufügen
+  }, [items, selectedFilterTags]);
 
-  // NEU: Sammelt exakt die Tags, die auf den aktuell markierten Items liegen (fürs Entfernen)
   const tagsOnSelectedItems = useMemo(() => {
     const tags = new Set<string>();
     selectedItemIds.forEach(id => {
@@ -120,9 +176,7 @@ export default function Dashboard() {
 
   const filteredItems = useMemo(() => {
     return items.filter(item => {
-      if (scannedLocationFilter && item.locationId !== scannedLocationFilter) {
-        return false;
-      }
+      if (scannedLocationFilter && item.locationId !== scannedLocationFilter) return false;
       const matchesSearch = searchTerm === "" || 
         item.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         item.tags?.some((tag: string) => tag.toLowerCase().includes(searchTerm.toLowerCase()));
@@ -160,50 +214,38 @@ export default function Dashboard() {
     e.stopPropagation();
     const groupItemIds = itemsInGroup.map(i => i.id);
     const allSelected = groupItemIds.every(id => selectedItemIds.has(id));
-    
     const newSet = new Set(selectedItemIds);
-    if (allSelected) {
-      groupItemIds.forEach(id => newSet.delete(id));
-    } else {
-      groupItemIds.forEach(id => newSet.add(id));
-    }
+    if (allSelected) groupItemIds.forEach(id => newSet.delete(id));
+    else groupItemIds.forEach(id => newSet.add(id));
     setSelectedItemIds(newSet);
   };
 
-  // ==========================================
-  // DIE MULTI-TOOL BULK FUNKTION
-  // ==========================================
   const handleBulkExecute = async () => {
-    if (selectedItemIds.size === 0) return;
+    if (selectedItemIds.size === 0 || !workspaceId) return;
     if (bulkAction !== 'delete' && !bulkInputValue.trim()) return;
 
-    if (bulkAction === 'delete') {
-      if (!confirm(`🚨 ACHTUNG: Willst du wirklich ${selectedItemIds.size} Items dauerhaft löschen?`)) return;
-    }
+    if (bulkAction === 'delete' && !confirm(`🚨 ACHTUNG: Willst du wirklich ${selectedItemIds.size} Items dauerhaft löschen?`)) return;
 
     setIsBulkUpdating(true);
     try {
       const batch = writeBatch(db);
+      const wsRef = doc(db, 'workspaces', workspaceId); // NEUER PFAD
       
       selectedItemIds.forEach(id => {
-        const itemRef = doc(db, 'items', id);
+        const itemRef = doc(collection(wsRef, 'items'), id); // NEUER PFAD
         
         if (bulkAction === 'delete') {
           batch.delete(itemRef);
         } else {
           const currentItem = items.find(i => i.id === id);
-          
-          if (bulkAction === 'location') {
-            batch.update(itemRef, { locationId: bulkInputValue });
-          } else if (bulkAction === 'category') {
+          if (bulkAction === 'location') batch.update(itemRef, { locationId: bulkInputValue });
+          else if (bulkAction === 'category') {
             const cat = categories.find(c => c.id === bulkInputValue);
             if (cat) batch.update(itemRef, { category: cat.name });
           } else if (bulkAction === 'addTag') {
             const newTag = bulkInputValue.trim();
             const currentTags = currentItem?.tags || [];
-            if (!currentTags.includes(newTag)) {
-              batch.update(itemRef, { tags: [...currentTags, newTag] });
-            }
+            if (!currentTags.includes(newTag)) batch.update(itemRef, { tags: [...currentTags, newTag] });
           } else if (bulkAction === 'removeTag') {
             const tagToRemove = bulkInputValue.trim();
             const currentTags = currentItem?.tags || [];
@@ -213,12 +255,8 @@ export default function Dashboard() {
       });
 
       await batch.commit();
+      if (bulkAction === 'removeTag') setSelectedFilterTags(prev => prev.filter(t => t !== bulkInputValue.trim()));
       
-      // NEU: Wenn ein Tag gelöscht wurde, werfen wir ihn automatisch aus dem aktiven Filter
-      if (bulkAction === 'removeTag') {
-        setSelectedFilterTags(prev => prev.filter(t => t !== bulkInputValue.trim()));
-      }
-
       setSelectedItemIds(new Set());
       setIsSelectionMode(false);
       setBulkAction(null);
@@ -244,7 +282,53 @@ export default function Dashboard() {
     return buildTree(null, 0);
   };
 
-  if (loading) return <div className="min-h-screen bg-slate-50 flex items-center justify-center text-slate-500 font-medium">Lade Werkstatt...</div>;
+  const handleLogout = () => {
+    if(confirm("Möchtest du die Werkstatt wirklich verlassen?")) {
+      localStorage.removeItem('shedsync_workspace');
+      window.location.reload();
+    }
+  };
+
+  // ==========================================
+  // RENDER: DER LOGIN-SCREEN
+  // ==========================================
+  if (isWorkspaceLoading) return <div className="min-h-screen bg-slate-50 p-8 flex items-center justify-center text-slate-500 font-medium">Lade ShedSync...</div>;
+
+  if (!workspaceId) {
+    return (
+      <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center p-4">
+        <div className="bg-white p-8 rounded-2xl shadow-2xl max-w-md w-full text-center">
+          <div className="flex justify-center mb-6">
+            <svg className="w-16 h-16 text-orange-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
+            </svg>
+          </div>
+          <h1 className="text-3xl font-black text-slate-900 mb-2">Shed<span className="text-orange-500">Sync</span></h1>
+          <p className="text-slate-500 mb-8 font-medium">Welche Werkstatt möchtest du betreten?</p>
+          
+          <form onSubmit={(e) => { e.preventDefault(); if(loginInput.trim()) setWorkspaceId(loginInput.trim().toLowerCase().replace(/[^a-z0-9-]/g, '-')); }}>
+            <input 
+              type="text" 
+              placeholder="Workspace-ID (z.B. janick-hq)" 
+              value={loginInput}
+              onChange={(e) => setLoginInput(e.target.value)}
+              className="w-full p-4 bg-slate-50 border border-slate-200 rounded-xl text-center text-lg font-bold text-slate-900 outline-none focus:border-orange-500 mb-4"
+              required
+            />
+            <button type="submit" className="w-full bg-orange-600 hover:bg-orange-500 text-white font-bold py-4 rounded-xl shadow-lg shadow-orange-200/50 transition text-lg">
+              Eintreten
+            </button>
+          </form>
+          <p className="text-xs text-slate-400 mt-6">Gib eine neue ID ein, um eine leere Werkstatt zu gründen.</p>
+        </div>
+      </div>
+    );
+  }
+
+  // ==========================================
+  // RENDER: DAS ECHTE DASHBOARD
+  // ==========================================
+  if (loading) return <div className="min-h-screen bg-slate-50 flex items-center justify-center text-slate-500 font-medium">Lade Werkstatt '{workspaceId}'...</div>;
 
   return (
     <div className={`min-h-screen bg-slate-50 ${isSelectionMode ? 'pb-40' : 'pb-20'}`}>
@@ -253,7 +337,7 @@ export default function Dashboard() {
         <div className="max-w-5xl mx-auto flex justify-between items-center">
           
           <div className="min-w-0 pr-2">
-            <h1 className="text-xl sm:text-2xl font-black tracking-tight flex items-center gap-1.5 truncate">
+            <h1 className="text-xl sm:text-2xl font-black tracking-tight flex items-center gap-1.5 truncate cursor-pointer hover:opacity-80" onClick={handleLogout} title="Workspace verlassen">
               <svg className="w-6 h-6 sm:w-8 sm:h-8 text-orange-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
               </svg>
@@ -293,6 +377,17 @@ export default function Dashboard() {
 
       <main className="max-w-5xl mx-auto p-4 md:p-8 mt-4 relative">
         
+        {/* MIGRATIONS-HINWEIS (Verschwindet, wenn Items da sind) */}
+        {items.length === 0 && (
+          <div className="bg-blue-50 border border-blue-200 p-6 rounded-2xl mb-8 text-center shadow-sm">
+            <h2 className="text-blue-900 font-black text-lg mb-2">👋 Willkommen im neuen Workspace!</h2>
+            <p className="text-blue-700 text-sm mb-4">Deine Werkstatt "{workspaceId}" ist noch leer. Möchtest du deine alten Daten in diesen sicheren Raum verschieben?</p>
+            <button onClick={handleMigration} disabled={isMigrating} className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-xl shadow-md transition disabled:opacity-50">
+              {isMigrating ? 'Kopiere Daten...' : '📥 Alte Daten jetzt importieren'}
+            </button>
+          </div>
+        )}
+
         {scannedLocationFilter && (
           <div className="bg-orange-100 border border-orange-200 text-orange-900 p-4 rounded-xl flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-6 shadow-sm animate-fade-in">
             <span className="text-sm font-bold flex items-center gap-2">
@@ -449,15 +544,13 @@ export default function Dashboard() {
           })}
           {Object.keys(groupedItems).length === 0 && (
             <div className="text-center py-12 bg-white rounded-xl border border-slate-200 border-dashed">
-              <p className="text-slate-400 font-medium">Keine Werkzeuge gefunden.</p>
+              <p className="text-slate-400 font-medium">Keine Werkzeuge in dieser Ansicht.</p>
             </div>
           )}
         </div>
       </main>
 
-      {/* ========================================= */}
       {/* FLOATING ACTION BAR FÜR MASSENMUTATION */}
-      {/* ========================================= */}
       {isSelectionMode && selectedItemIds.size > 0 && (
         <div className="fixed bottom-0 left-0 right-0 bg-slate-900 text-white p-4 shadow-[0_-10px_40px_rgba(0,0,0,0.3)] z-50 animate-slide-up border-t border-slate-700 pb-safe">
           <div className="max-w-4xl mx-auto flex flex-col sm:flex-row items-center gap-4 justify-between">
@@ -474,7 +567,6 @@ export default function Dashboard() {
               </button>
             </div>
 
-            {/* Aktion auswählen */}
             {!bulkAction && (
               <div className="flex flex-wrap gap-2 w-full justify-end">
                 <button onClick={() => setBulkAction('location')} className="flex-1 sm:flex-none bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold py-2.5 px-3 rounded-lg border border-slate-600 transition">📍 Ort</button>
@@ -485,7 +577,6 @@ export default function Dashboard() {
               </div>
             )}
 
-            {/* Detail-Eingabe für die gewählte Aktion */}
             {bulkAction && (
               <div className="flex items-center gap-2 w-full sm:w-auto">
                 {bulkAction === 'location' && (

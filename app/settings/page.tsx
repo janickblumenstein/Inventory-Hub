@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { db } from '../../lib/firebase';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import Link from 'next/link';
+import { useWorkspace } from '../../context/WorkspaceContext';
 
 export type CategoryConfig = {
   id: string;
@@ -29,6 +30,7 @@ const DEFAULT_CATEGORIES: CategoryConfig[] = [
 const WORKSHOP_ICONS = ['📦', '🔨', '🔌', '🔩', '🌿', '🪚', '🪜', '🧰', '🧹', '🛢️', '💡', '🔋', '⚙️', '🗜️', '🪛', '🔧', '🪓', '🚿', '📐', '✏️', '🖌️', '🪣', '🔒', '🧪'];
 
 export default function SettingsPage() {
+  const { workspaceId } = useWorkspace();
   const [ownerName, setOwnerName] = useState('');
   const [categories, setCategories] = useState<CategoryConfig[]>([]);
   const [loading, setLoading] = useState(true);
@@ -45,9 +47,10 @@ export default function SettingsPage() {
   const [newTags, setNewTags] = useState('');
 
   useEffect(() => {
+    if (!workspaceId) return;
     const fetchSettings = async () => {
       try {
-        const snap = await getDoc(doc(db, 'settings', 'main'));
+        const snap = await getDoc(doc(db, 'workspaces', workspaceId!, 'settings', 'main'));
         if (snap.exists()) {
           const data = snap.data();
           setOwnerName(data.ownerName || '');
@@ -60,11 +63,11 @@ export default function SettingsPage() {
             setCategories(normalized);
           } else {
             setCategories(DEFAULT_CATEGORIES);
-            await setDoc(doc(db, 'settings', 'main'), { ownerName: data.ownerName || '', categories: DEFAULT_CATEGORIES }, { merge: true });
+            await setDoc(doc(db, 'workspaces', workspaceId!, 'settings', 'main'), { ownerName: data.ownerName || '', categories: DEFAULT_CATEGORIES }, { merge: true });
           }
         } else {
           setCategories(DEFAULT_CATEGORIES);
-          await setDoc(doc(db, 'settings', 'main'), { ownerName: '', categories: DEFAULT_CATEGORIES });
+          await setDoc(doc(db, 'workspaces', workspaceId!, 'settings', 'main'), { ownerName: '', categories: DEFAULT_CATEGORIES });
         }
       } catch (error) {
         console.error("Fehler beim Laden:", error);
@@ -73,12 +76,12 @@ export default function SettingsPage() {
       }
     };
     fetchSettings();
-  }, []);
+  }, [workspaceId]);
 
   const saveSettings = async (updatedCategories = categories) => {
     setIsSaving(true);
     try {
-      await setDoc(doc(db, 'settings', 'main'), {
+      await setDoc(doc(db, 'workspaces', workspaceId!, 'settings', 'main'), {
         ownerName,
         categories: updatedCategories
       });

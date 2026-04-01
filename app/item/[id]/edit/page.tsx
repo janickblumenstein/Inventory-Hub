@@ -7,8 +7,10 @@ import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import type { CategoryConfig } from '../../../settings/page'; 
+import { useWorkspace } from '../../../../context/WorkspaceContext';
 
 export default function EditItem({ params }: { params: Promise<{ id: string }> }) {
+  const { workspaceId } = useWorkspace();
   const router = useRouter();
   
   const resolvedParams = use(params);
@@ -19,7 +21,6 @@ export default function EditItem({ params }: { params: Promise<{ id: string }> }
   const [quantity, setQuantity] = useState(1);
   const [locationId, setLocationId] = useState(''); 
   
-  // NEU: Das smarte Kategorie-System anstelle des alten TagSelectors
   const [categories, setCategories] = useState<CategoryConfig[]>([]);
   const [selectedCategoryId, setSelectedCategoryId] = useState<string>('');
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
@@ -40,25 +41,23 @@ export default function EditItem({ params }: { params: Promise<{ id: string }> }
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
+    if (!workspaceId) return;
     const fetchData = async () => {
       try {
-        // 1. Lagerorte laden
-        const locSnapshot = await getDocs(collection(db, 'locations'));
+        const locSnapshot = await getDocs(collection(db, 'workspaces', workspaceId, 'locations'));
         const locs: any[] = [];
         locSnapshot.forEach((doc) => { locs.push({ id: doc.id, ...doc.data() }); });
         setLocations(locs);
 
-        // 2. Kategorien (Das "Gehirn") laden
-        const settingsSnap = await getDoc(doc(db, 'settings', 'main'));
+        const settingsSnap = await getDoc(doc(db, 'workspaces', workspaceId, 'settings', 'main'));
         let loadedCats: CategoryConfig[] = [];
         if (settingsSnap.exists() && settingsSnap.data().categories) {
           loadedCats = settingsSnap.data().categories;
           setCategories(loadedCats);
         }
 
-        // 3. Dieses Item laden und Formular befüllen
         if (id) {
-          const itemRef = doc(db, 'items', id);
+          const itemRef = doc(db, 'workspaces', workspaceId, 'items', id);
           const itemSnap = await getDoc(itemRef);
           if (itemSnap.exists()) {
             const data = itemSnap.data();
@@ -71,7 +70,6 @@ export default function EditItem({ params }: { params: Promise<{ id: string }> }
             setAttributes(data.attributes || {});
             setSelectedTags(data.tags || []);
             
-            // Die richtige Kategorie anhand des gespeicherten Namens finden
             if (data.category) {
               const matchedCat = loadedCats.find(c => c.name === data.category);
               if (matchedCat) setSelectedCategoryId(matchedCat.id);
@@ -93,13 +91,10 @@ export default function EditItem({ params }: { params: Promise<{ id: string }> }
       }
     };
     fetchData();
-  }, [id]);
+  }, [id, workspaceId]); // FIX: workspaceId als Abhängigkeit hinzugefügt!
 
   const handleCategorySelect = (cat: CategoryConfig) => {
     setSelectedCategoryId(cat.id);
-    // Behält die Tags bei, wenn man sich verklickt hat, ansonsten leeren
-    // setSelectedTags([]); 
-    // setAttributes({});   
     setCustomTagInput('');
     if (cat.autoOpenWarranty) setShowWarranty(true);
   };
@@ -132,7 +127,7 @@ export default function EditItem({ params }: { params: Promise<{ id: string }> }
 
   const handleSave = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
-    if (!activeCategory) {
+    if (!activeCategory || !workspaceId) {
       alert("Bitte wähle eine Haupt-Kategorie aus!");
       return;
     }
@@ -141,12 +136,13 @@ export default function EditItem({ params }: { params: Promise<{ id: string }> }
     try {
       let finalReceiptUrl = receiptUrl;
       if (showWarranty && receiptFile) {
-        const fileRef = ref(storage, `receipts/${id}_${Date.now()}`);
+        // FIX: Kassenbelege jetzt sicher im Workspace-Ordner ablegen!
+        const fileRef = ref(storage, `workspaces/${workspaceId}/receipts/${id}_${Date.now()}`);
         await uploadBytes(fileRef, receiptFile);
         finalReceiptUrl = await getDownloadURL(fileRef);
       }
 
-      const itemRef = doc(db, 'items', id);
+      const itemRef = doc(db, 'workspaces', workspaceId, 'items', id);
       await updateDoc(itemRef, {
         name,
         ean,
@@ -162,11 +158,10 @@ export default function EditItem({ params }: { params: Promise<{ id: string }> }
         receiptUrl: showWarranty ? finalReceiptUrl : null
       });
 
-      // Die Selbstlern-Funktion (Ergänzt die Settings-Bibliothek auch beim Bearbeiten)
       const newCustomTags = selectedTags.filter(t => !(activeCategory.tags || []).includes(t));
       if (newCustomTags.length > 0) {
         try {
-          const settingsRef = doc(db, 'settings', 'main');
+          const settingsRef = doc(db, 'workspaces', workspaceId, 'settings', 'main');
           const settingsSnap = await getDoc(settingsRef);
           if (settingsSnap.exists()) {
             const data = settingsSnap.data();
@@ -192,15 +187,16 @@ export default function EditItem({ params }: { params: Promise<{ id: string }> }
   };
 
   const handleDelete = async () => {
+    if (!workspaceId) return;
     if (window.confirm("Möchtest du dieses Item wirklich dauerhaft löschen?")) {
-      await deleteDoc(doc(db, 'items', id));
+      await deleteDoc(doc(db, 'workspaces', workspaceId, 'items', id));
       router.push('/');
     }
   };
 
   const selectedLoc = locations.find(l => l.id === locationId);
 
-  if (isLoading) return <div className="min-h-screen bg-slate-50 p-8 text-center text-slate-500 font-medium">Lade Daten...</div>;
+  if (isLoading || !workspaceId) return <div className="min-h-screen bg-slate-50 p-8 text-center text-slate-500 font-medium">Lade Daten...</div>;
 
   return (
     <div className="min-h-screen bg-slate-50 p-4 md:p-8 pb-32">
@@ -222,7 +218,6 @@ export default function EditItem({ params }: { params: Promise<{ id: string }> }
               <input type="text" value={name} onChange={(e) => setName(e.target.value)} className="w-full p-3 border border-slate-300 rounded-xl bg-white text-slate-900 outline-none font-bold text-lg focus:border-orange-500 transition" required />
             </div>
 
-            {/* DYNAMISCHE KATEGORIE-AUSWAHL */}
             <div className="pt-2">
               <label className="block text-[10px] font-bold text-slate-500 uppercase mb-2">Haupt-Kategorie wählen</label>
               <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
@@ -249,7 +244,6 @@ export default function EditItem({ params }: { params: Promise<{ id: string }> }
               </div>
             </div>
 
-            {/* DYNAMISCHE TAG-BIBLIOTHEK + CUSTOM TAGS */}
             {activeCategory && (
               <div className="p-4 bg-slate-50 border border-slate-200 rounded-xl animate-fade-in">
                 <label className="block text-[10px] font-bold text-slate-500 uppercase mb-2">Spezifischer Typ</label>
@@ -297,7 +291,6 @@ export default function EditItem({ params }: { params: Promise<{ id: string }> }
               </div>
             )}
 
-            {/* DYNAMISCHE ATTRIBUTE */}
             {activeCategory && activeCategory.attributes && activeCategory.attributes.length > 0 && (
               <div className="p-4 bg-purple-50 border border-purple-100 rounded-xl animate-fade-in">
                 <label className="block text-[10px] font-bold text-purple-800 uppercase mb-3 flex items-center gap-1">

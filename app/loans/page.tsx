@@ -4,16 +4,20 @@ import { useEffect, useState } from 'react';
 import { db } from '../../lib/firebase';
 import { collection, getDocs, query, orderBy, updateDoc, doc } from 'firebase/firestore';
 import Link from 'next/link';
+import { useWorkspace } from '../../context/WorkspaceContext'; // <--- NEU: Wächter importiert
 
 export default function LoansOverview() {
+  const { workspaceId } = useWorkspace(); // <--- NEU: Wächter aufgerufen
+  
   const [loans, setLoans] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<'active' | 'returned'>('active');
 
   const fetchLoans = async () => {
+    if (!workspaceId) return;
     setLoading(true);
     try {
-      const q = query(collection(db, 'loans'), orderBy('borrowDate', 'desc'));
+      const q = query(collection(db, 'workspaces', workspaceId, 'loans'), orderBy('borrowDate', 'desc'));
       const snap = await getDocs(q);
       setLoans(snap.docs.map(d => ({ id: d.id, ...d.data() })));
     } catch (error) {
@@ -24,13 +28,17 @@ export default function LoansOverview() {
   };
 
   useEffect(() => {
-    fetchLoans();
-  }, []);
+    if (workspaceId) {
+      fetchLoans();
+    }
+  }, [workspaceId]); // <--- NEU: Abhängigkeit hinzugefügt
 
   const handleReturnItem = async (loanId: string) => {
+    if (!workspaceId) return;
     if (!confirm("Werkzeug wieder da?")) return;
     try {
-      await updateDoc(doc(db, 'loans', loanId), { 
+      // FIX: Zeigt jetzt in den Workspace-Ordner
+      await updateDoc(doc(db, 'workspaces', workspaceId, 'loans', loanId), { 
         status: 'returned',
         returnedDate: new Date().toISOString()
       });
@@ -41,6 +49,8 @@ export default function LoansOverview() {
   };
 
   const displayedLoans = loans.filter(l => l.status === filter);
+
+  if (!workspaceId) return <div className="min-h-screen bg-slate-50 p-8 text-center text-slate-500">Lade Verleih-Center...</div>;
 
   return (
     <div className="min-h-screen bg-slate-50 p-4 md:p-8">

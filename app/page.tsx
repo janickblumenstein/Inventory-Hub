@@ -2,9 +2,9 @@
 
 import { useEffect, useState, useMemo } from 'react';
 import { db } from '../lib/firebase';
-import { collection, getDocs, orderBy, query, writeBatch, doc, getDoc, setDoc } from 'firebase/firestore';
+import { collection, getDocs, orderBy, query, writeBatch, doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
 import Link from 'next/link';
-import { useWorkspace } from '../context/WorkspaceContext'; // <--- NEU: Wir holen uns den Wächter
+import { useWorkspace } from '../context/WorkspaceContext'; 
 
 export default function Dashboard() {
   // 1. WORKSPACE LOGIK
@@ -18,6 +18,9 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [categories, setCategories] = useState<any[]>([]);
   
+  // 🔥 NEU: Tab Navigation
+  const [activeTab, setActiveTab] = useState<'inventory' | 'inbox' | 'shopping'>('inventory');
+
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedFilterTags, setSelectedFilterTags] = useState<string[]>([]);
   const [groupBy, setGroupBy] = useState<'location' | 'category' | 'none'>('location');
@@ -31,13 +34,12 @@ export default function Dashboard() {
   const [bulkAction, setBulkAction] = useState<'location' | 'category' | 'addTag' | 'removeTag' | 'delete' | null>(null);
   const [bulkInputValue, setBulkInputValue] = useState('');
 
-  // 3. DATEN LADEN (Achtung: Neue Pfade!)
+  // 3. DATEN LADEN
   const fetchData = async () => {
-    if (!workspaceId) return; // Stopp, wenn wir nicht eingeloggt sind
+    if (!workspaceId) return; 
     
     setLoading(true);
     try {
-      // Pfade sind jetzt: workspaces -> [ID] -> locations/items/settings
       const workspaceRef = doc(db, 'workspaces', workspaceId);
 
       const locSnap = await getDocs(collection(workspaceRef, 'locations'));
@@ -85,9 +87,7 @@ export default function Dashboard() {
     }
   }, [workspaceId]);
 
-  // ==========================================
-  // MIGRATIONS-SKRIPT (NUR EINMALIG BENUTZEN!)
-  // ==========================================
+  // MIGRATIONS-SKRIPT
   const handleMigration = async () => {
     if (!workspaceId) return;
     if (!confirm("🚨 ACHTUNG: Möchtest du wirklich alle alten Daten aus dem Hauptverzeichnis in diesen Workspace kopieren? Mache das nur 1x!")) return;
@@ -97,21 +97,18 @@ export default function Dashboard() {
       const targetWorkspace = doc(db, 'workspaces', workspaceId);
       const batch = writeBatch(db);
       
-      // 1. Items kopieren
       const oldItems = await getDocs(collection(db, 'workspaces', workspaceId!, 'items'));
       oldItems.forEach(docSnap => {
         const newRef = doc(collection(targetWorkspace, 'items'), docSnap.id);
         batch.set(newRef, docSnap.data());
       });
 
-      // 2. Locations kopieren
       const oldLocs = await getDocs(collection(db, 'workspaces', workspaceId!, 'locations'));
       oldLocs.forEach(docSnap => {
         const newRef = doc(collection(targetWorkspace, 'locations'), docSnap.id);
         batch.set(newRef, docSnap.data());
       });
 
-      // 3. Settings kopieren
       const oldSettings = await getDoc(doc(db, 'workspaces', workspaceId!, 'settings', 'main'));
       if (oldSettings.exists()) {
         batch.set(doc(targetWorkspace, 'settings', 'main'), oldSettings.data());
@@ -128,15 +125,23 @@ export default function Dashboard() {
     }
   };
 
-  // ... (Ab hier bleibt deine gesamte Logik für Memos, Filter und BulkEdit unangetastet, 
-  // ABER wir müssen im BulkEdit die Pfade anpassen!) ...
+  // 🔥 NEU: Tab-Spezifische Filterung
+  const inboxItemsCount = items.filter(i => !i.category || i.category.trim() === '').length;
+  const shoppingItemsCount = items.filter(i => i.onShoppingList === true).length;
+
+  const currentTabItems = useMemo(() => {
+    if (activeTab === 'inbox') return items.filter(i => !i.category || i.category.trim() === '');
+    if (activeTab === 'shopping') return items.filter(i => i.onShoppingList === true);
+    // Standard: Inventar (Nur sortierte Items ODER wenn wir im Shopping/Inbox waren, blenden wir sie hier aus)
+    return items.filter(i => i.category && i.category.trim() !== '');
+  }, [items, activeTab]);
 
   const availableTags = useMemo(() => {
     const tags = new Set<string>();
-    items.forEach(item => { if (item.tags) item.tags.forEach((t: string) => tags.add(t)); });
+    currentTabItems.forEach(item => { if (item.tags) item.tags.forEach((t: string) => tags.add(t)); });
     selectedFilterTags.forEach(t => tags.add(t));
     return Array.from(tags).sort();
-  }, [items, selectedFilterTags]);
+  }, [currentTabItems, selectedFilterTags]);
 
   const tagsOnSelectedItems = useMemo(() => {
     const tags = new Set<string>();
@@ -175,16 +180,17 @@ export default function Dashboard() {
   };
 
   const filteredItems = useMemo(() => {
-    return items.filter(item => {
+    return currentTabItems.filter(item => {
       if (scannedLocationFilter && item.locationId !== scannedLocationFilter) return false;
       const matchesSearch = searchTerm === "" || 
         item.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        item.ean?.includes(searchTerm) || // 🔥 NEU: EAN in Suche aufgenommen
         item.tags?.some((tag: string) => tag.toLowerCase().includes(searchTerm.toLowerCase()));
       const matchesChips = selectedFilterTags.length === 0 || 
         selectedFilterTags.every(filterTag => item.tags?.includes(filterTag));
       return matchesSearch && matchesChips;
     });
-  }, [items, searchTerm, selectedFilterTags, scannedLocationFilter]);
+  }, [currentTabItems, searchTerm, selectedFilterTags, scannedLocationFilter]);
 
   const groupedItems = useMemo(() => {
     if (groupBy === 'none') return { 'Alle Items': filteredItems };
@@ -229,10 +235,10 @@ export default function Dashboard() {
     setIsBulkUpdating(true);
     try {
       const batch = writeBatch(db);
-      const wsRef = doc(db, 'workspaces', workspaceId); // NEUER PFAD
+      const wsRef = doc(db, 'workspaces', workspaceId); 
       
       selectedItemIds.forEach(id => {
-        const itemRef = doc(collection(wsRef, 'items'), id); // NEUER PFAD
+        const itemRef = doc(collection(wsRef, 'items'), id); 
         
         if (bulkAction === 'delete') {
           batch.delete(itemRef);
@@ -286,6 +292,20 @@ export default function Dashboard() {
     if(confirm("Möchtest du die Werkstatt wirklich verlassen?")) {
       localStorage.removeItem('shedsync_workspace');
       window.location.reload();
+    }
+  };
+
+  // 🔥 NEU: Einkaufsliste Toggle Funktion
+  const toggleShoppingListStatus = async (itemId: string, currentState: boolean, e: React.MouseEvent) => {
+    e.preventDefault(); // Verhindert Navigation in die Detailansicht
+    e.stopPropagation();
+    if (!workspaceId) return;
+    
+    setItems(items.map(item => item.id === itemId ? { ...item, onShoppingList: !currentState } : item));
+    try {
+      await updateDoc(doc(db, 'workspaces', workspaceId, 'items', itemId), { onShoppingList: !currentState });
+    } catch (error) {
+      alert("Fehler beim Aktualisieren.");
     }
   };
 
@@ -377,16 +397,42 @@ export default function Dashboard() {
 
       <main className="max-w-5xl mx-auto p-4 md:p-8 mt-4 relative">
         
-        {/* MIGRATIONS-HINWEIS (Verschwindet, wenn Items da sind) */}
-        {/*{items.length === 0 && (
-          <div className="bg-blue-50 border border-blue-200 p-6 rounded-2xl mb-8 text-center shadow-sm">
-            <h2 className="text-blue-900 font-black text-lg mb-2">👋 Willkommen im neuen Workspace!</h2>
-            <p className="text-blue-700 text-sm mb-4">Deine Werkstatt "{workspaceId}" ist noch leer. Möchtest du deine alten Daten in diesen sicheren Raum verschieben?</p>
-            <button onClick={handleMigration} disabled={isMigrating} className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-6 rounded-xl shadow-md transition disabled:opacity-50">
-              {isMigrating ? 'Kopiere Daten...' : '📥 Alte Daten jetzt importieren'}
-            </button>
-          </div>
-        )}*/}
+        {/* 🔥 NEU: DIE TABS (Inventar, Inbox, Shopping) */}
+        <div className="flex gap-2 p-1 bg-slate-200/50 rounded-xl mb-6 overflow-x-auto hide-scrollbar">
+          <button 
+            onClick={() => { setActiveTab('inventory'); setSelectedItemIds(new Set()); }}
+            className={`flex-1 py-2.5 px-4 rounded-lg font-bold text-sm whitespace-nowrap transition-all ${activeTab === 'inventory' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-200/50'}`}
+          >
+            📦 Inventar
+          </button>
+          
+          <button 
+            onClick={() => { setActiveTab('inbox'); setSelectedItemIds(new Set()); }}
+            className={`flex-1 py-2.5 px-4 rounded-lg font-bold text-sm whitespace-nowrap transition-all flex items-center justify-center gap-2 ${activeTab === 'inbox' ? 'bg-white text-orange-600 shadow-sm' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-200/50'}`}
+          >
+            📥 Inbox 
+            {inboxItemsCount > 0 && (
+              <span className={`px-2 py-0.5 rounded-full text-[10px] ${activeTab === 'inbox' ? 'bg-orange-100 text-orange-700' : 'bg-slate-300 text-slate-600'}`}>
+                {inboxItemsCount}
+              </span>
+            )}
+          </button>
+          
+          <button 
+            onClick={() => { setActiveTab('shopping'); setSelectedItemIds(new Set()); }}
+            className={`flex-1 py-2.5 px-4 rounded-lg font-bold text-sm whitespace-nowrap transition-all flex items-center justify-center gap-2 ${activeTab === 'shopping' ? 'bg-white text-red-600 shadow-sm' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-200/50'}`}
+          >
+            🛒 Einkauf
+            {shoppingItemsCount > 0 && (
+              <span className={`px-2 py-0.5 rounded-full text-[10px] ${activeTab === 'shopping' ? 'bg-red-100 text-red-700' : 'bg-slate-300 text-slate-600'}`}>
+                {shoppingItemsCount}
+              </span>
+            )}
+          </button>
+        </div>
+
+        {/* MIGRATIONS-HINWEIS */}
+        {/* ... */}
 
         {scannedLocationFilter && (
           <div className="bg-orange-100 border border-orange-200 text-orange-900 p-4 rounded-xl flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-6 shadow-sm animate-fade-in">
@@ -405,10 +451,11 @@ export default function Dashboard() {
           </div>
         )}
 
+        {/* SUCHE & FILTER */}
         <div className="bg-white rounded-xl shadow-sm border border-slate-200 p-4 mb-6">
           <input 
             type="text" 
-            placeholder="🔍 Suchen nach Werkzeug oder Tag..." 
+            placeholder={activeTab === 'inbox' ? "🔍 Suchen in der Inbox..." : "🔍 Suchen nach Werkzeug, Tag oder EAN..."}
             value={searchTerm} 
             onChange={(e) => setSearchTerm(e.target.value)} 
             className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg text-slate-900 placeholder-slate-400 outline-none focus:ring-2 focus:ring-orange-500 mb-3" 
@@ -444,6 +491,7 @@ export default function Dashboard() {
           </div>
         </div>
 
+        {/* DIE LISTEN ANSICHT (Funktioniert für alle Tabs!) */}
         <div className="space-y-6">
           {Object.entries(groupedItems).map(([groupName, itemsInGroup]) => {
             const groupItemIds = itemsInGroup.map(i => i.id);
@@ -489,7 +537,7 @@ export default function Dashboard() {
                       const ItemWrapper = isSelectionMode ? 'div' : Link;
                       const wrapperProps = isSelectionMode 
                         ? { onClick: (e: any) => toggleItemSelection(item.id, e), className: `cursor-pointer block p-3 sm:p-4 transition group ${isSelected ? 'bg-orange-50' : 'hover:bg-slate-50'}` }
-                        : { href: `/item/${item.id}`, className: "block p-3 sm:p-4 hover:bg-orange-50 transition group" };
+                        : { href: activeTab === 'inbox' ? `/item/${item.id}/edit` : `/item/${item.id}`, className: "block p-3 sm:p-4 hover:bg-orange-50 transition group" };
 
                       return (
                         <ItemWrapper key={item.id} {...wrapperProps as any}>
@@ -503,9 +551,23 @@ export default function Dashboard() {
                               </div>
                             )}
 
+                            {/* ITEM BILD (Neu, aus der Inbox übernommen) */}
+                            <div className="w-12 h-12 sm:w-16 sm:h-16 bg-slate-50 border border-slate-200 rounded-lg shrink-0 overflow-hidden flex items-center justify-center p-1 relative">
+                              {activeTab === 'inbox' && <div className="absolute top-1 left-1 w-2 h-2 bg-red-500 rounded-full animate-pulse z-10"></div>}
+                              {item.imageUrl ? (
+                                <img src={item.imageUrl} alt={item.name} className="w-full h-full object-contain mix-blend-multiply" />
+                              ) : (
+                                <span className="opacity-40">{activeTab === 'inbox' ? '📸' : '📦'}</span>
+                              )}
+                            </div>
+
                             <div className="flex-1 min-w-0">
-                              <h3 className={`font-bold truncate transition ${isSelected ? 'text-orange-900' : 'text-slate-900 group-hover:text-orange-700'}`}>{item.name}</h3>
+                              <h3 className={`font-bold truncate transition flex items-center gap-2 ${isSelected ? 'text-orange-900' : 'text-slate-900 group-hover:text-orange-700'}`}>
+                                {item.name || 'Unbenanntes Item'}
+                              </h3>
                               
+                              {item.ean && <p className="text-[10px] text-slate-500 font-mono mt-0.5">EAN: {item.ean}</p>}
+
                               {groupBy === 'location' && item.subPath && (
                                 <span className="inline-flex items-center gap-1 mt-1 text-[10px] font-bold text-orange-600 bg-orange-50 px-2 py-0.5 rounded border border-orange-100">
                                   📍 {item.subPath}
@@ -520,17 +582,31 @@ export default function Dashboard() {
                               {groupBy !== 'location' && item.locationId && (
                                 <span className="block mt-1 text-[10px] text-slate-500 truncate">
                                   📍 {getRootLocationName(item.locationId, locations)} {item.subPath && `> ${item.subPath}`}
-                                  {locations.find(l => l.id === item.locationId)?.code && (
-                                    <span className="font-mono ml-1 opacity-70">[{locations.find(l => l.id === item.locationId)?.code}]</span>
-                                  )}
                                 </span>
                               )}
                             </div>
 
-                            <div className="text-right shrink-0">
+                            {/* STATUS & MENGE */}
+                            <div className="text-right shrink-0 flex flex-col items-end gap-2">
+                              
+                              {/* 🛒 Einkaufslisten Herz */}
+                              {!isSelectionMode && (
+                                <button 
+                                  onClick={(e) => toggleShoppingListStatus(item.id, item.onShoppingList, e)}
+                                  className="text-lg hover:scale-110 transition p-1"
+                                  title={item.onShoppingList ? 'Von Einkaufsliste entfernen' : 'Auf Einkaufsliste setzen'}
+                                >
+                                  {item.onShoppingList ? '❤️' : '🤍'}
+                                </button>
+                              )}
+
                               <span className={`font-bold px-3 py-1 rounded-md border transition ${isSelected ? 'bg-orange-200 border-orange-300 text-orange-900' : 'bg-slate-100 text-slate-800 border-slate-200'}`}>
                                 {item.quantity}x
                               </span>
+
+                              {activeTab === 'inbox' && !isSelectionMode && (
+                                <span className="text-[10px] bg-orange-100 text-orange-700 px-2 py-1 rounded font-bold">✏️ Einsortieren</span>
+                              )}
                             </div>
                             
                           </div>
@@ -544,7 +620,7 @@ export default function Dashboard() {
           })}
           {Object.keys(groupedItems).length === 0 && (
             <div className="text-center py-12 bg-white rounded-xl border border-slate-200 border-dashed">
-              <p className="text-slate-400 font-medium">Keine Werkzeuge in dieser Ansicht.</p>
+              <p className="text-slate-400 font-medium">Keine Items in diesem Tab gefunden.</p>
             </div>
           )}
         </div>

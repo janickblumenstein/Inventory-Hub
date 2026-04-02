@@ -261,14 +261,14 @@ export default function SettingsPage() {
                 placeholder="Name (z.B. Jumbo)" 
                 value={newShopName}
                 onChange={(e) => setNewShopName(e.target.value)}
-                className="w-full sm:w-1/3 p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none text-sm focus:border-orange-500"
+                className="w-full sm:w-1/3 p-3 bg-slate-50 text-slate-900 placeholder-slate-400 border border-slate-200 rounded-xl outline-none text-sm focus:border-orange-500"
               />
               <input 
                 type="url" 
                 placeholder="Such-URL (z.B. https://jumbo.ch/search?q=)" 
                 value={newShopUrl}
                 onChange={(e) => setNewShopUrl(e.target.value)}
-                className="w-full sm:flex-1 p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none text-sm font-mono focus:border-orange-500"
+                className="w-full sm:flex-1 p-3 bg-slate-50 text-slate-900 placeholder-slate-400 border border-slate-200 rounded-xl outline-none text-sm font-mono focus:border-orange-500"
               />
               <button 
                 type="button"

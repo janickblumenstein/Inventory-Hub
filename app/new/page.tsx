@@ -140,12 +140,19 @@ export default function NewItem() {
       });
       const data = await res.json();
       
-      if (data.title) setName(data.title); 
-      if (data.imageUrl) setImageUrl(data.imageUrl); 
-      setProductUrl(pastedUrl); 
-      setPastedUrl(''); 
-      
-      alert('✅ Bild und Titel erfolgreich vom Shop geladen!');
+      // 🔥 NEU: Wir prüfen, ob wirklich ein Titel ODER ein Bild zurückkam
+      if (res.ok && (data.title || data.imageUrl)) {
+        if (data.title) setName(data.title); 
+        if (data.imageUrl) setImageUrl(data.imageUrl); 
+        setProductUrl(pastedUrl); 
+        setPastedUrl(''); 
+        alert('✅ Bild und Titel erfolgreich vom Shop geladen!');
+      } else {
+        // Falls die neue API auch von Cloudflare besiegt wird
+        alert('❌ Der Shop blockiert die automatische Abfrage aus Sicherheitsgründen (Bot-Schutz). Bitte tippe den Namen manuell ein, der Link wird aber trotzdem gespeichert!');
+        setProductUrl(pastedUrl); // Den Link speichern wir trotzdem, damit du später abspringen kannst!
+        setPastedUrl('');
+      }
     } catch (error) {
       alert('❌ Fehler beim Laden der Daten vom Shop.');
     } finally {

@@ -266,7 +266,7 @@ export default function EditItem({ params }: { params: Promise<{ id: string }> }
 
   const selectedLoc = locations.find(l => l.id === locationId);
   // Such-String für die Shop-Buttons (Priorisiert EAN, ansonsten Name)
-  const searchQuery = encodeURIComponent(ean || name);
+  const searchQuery = encodeURIComponent(name);
 
   if (isLoading || !workspaceId) return <div className="min-h-screen bg-slate-50 p-8 text-center text-slate-500 font-medium">Lade Daten...</div>;
 

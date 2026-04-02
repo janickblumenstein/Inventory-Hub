@@ -1,40 +1,33 @@
 import { NextResponse } from 'next/server';
+import * as cheerio from 'cheerio';
 
 export async function POST(request: Request) {
   try {
     const { url } = await request.json();
+    if (!url) return NextResponse.json({ error: 'Keine URL angegeben' }, { status: 400 });
 
-    if (!url || !url.startsWith('http')) {
-      return NextResponse.json({ error: 'Ungültige URL' }, { status: 400 });
-    }
-
-    // 1. Webseite herunterladen
-    const response = await fetch(url, {
+    // 🔥 DIE TARNKAPPE: Wir tun so, als wären wir ein normaler Windows-Chrome-Browser!
+    const res = await fetch(url, {
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+        'Accept-Language': 'de-CH,de;q=0.9,en-US;q=0.8,en;q=0.7',
       }
     });
-    
-    const html = await response.text();
 
-    // 2. Open Graph Meta-Tags extrahieren (Das sind die Infos, die auch WhatsApp für Link-Vorschauen nutzt)
-    const titleMatch = html.match(/<meta\s+property="og:title"\s+content="([^"]+)"/i) 
-                    || html.match(/<title>([^<]+)<\/title>/i);
-    const imageMatch = html.match(/<meta\s+property="og:image"\s+content="([^"]+)"/i);
+    const html = await res.text();
+    const $ = cheerio.load(html);
 
-    const title = titleMatch ? titleMatch[1] : null;
-    let imageUrl = imageMatch ? imageMatch[1] : null;
+    let title = $('meta[property="og:title"]').attr('content') || $('title').text() || '';
+    let imageUrl = $('meta[property="og:image"]').attr('content') || '';
 
-    // Manchmal sind Bild-URLs relativ (/bild.jpg), wir machen sie absolut
-    if (imageUrl && imageUrl.startsWith('/')) {
-      const urlObj = new URL(url);
-      imageUrl = `${urlObj.protocol}//${urlObj.host}${imageUrl}`;
+    // Falls Galaxus uns trotzdem blockt (Access Denied), geben wir lieber keinen Namen zurück als den Fehler-Namen
+    if (title.toLowerCase().includes('access denied') || title.toLowerCase().includes('cloudflare')) {
+        title = ''; 
     }
 
-    return NextResponse.json({ title, imageUrl });
-
+    return NextResponse.json({ title: title.trim(), imageUrl });
   } catch (error) {
-    console.error("Scraping Error:", error);
-    return NextResponse.json({ error: 'Fehler beim Laden der Vorschau' }, { status: 500 });
+    return NextResponse.json({ error: 'Fehler beim Scrapen' }, { status: 500 });
   }
 }

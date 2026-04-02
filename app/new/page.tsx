@@ -140,7 +140,7 @@ export default function NewItem() {
       });
       const data = await res.json();
       
-      if (data.title && !name) setName(data.title); 
+      if (data.title) setName(data.title); 
       if (data.imageUrl) setImageUrl(data.imageUrl); 
       setProductUrl(pastedUrl); 
       setPastedUrl(''); 
@@ -231,7 +231,7 @@ export default function NewItem() {
     }
   };
 
-  const searchQuery = encodeURIComponent(ean || name);
+  const searchQuery = encodeURIComponent(name);
 
   if (!workspaceId) return <div className="p-8 text-center text-slate-500">Lade...</div>;
 
@@ -472,13 +472,28 @@ export default function NewItem() {
               <div>
                 <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Lagerort (Optional)</label>
                 <select 
-                  value={locationId} 
-                  onChange={(e) => { setLocationId(e.target.value); setTagX(null); setTagY(null); }} 
-                  className="w-full p-3 border border-slate-300 rounded-xl bg-white text-slate-900 font-medium text-sm"
-                >
-                  <option value="">-- Ort wählen --</option>
-                  {locations.map(loc => <option key={loc.id} value={loc.id}>{loc.name}</option>)}
-                </select>
+                    value={locationId} 
+                    onChange={(e) => { setLocationId(e.target.value); setTagX(null); setTagY(null); }} 
+                    className="w-full p-3 border border-slate-300 rounded-xl bg-white text-slate-900 font-medium text-sm"
+                  >
+                    <option value="">-- Ort wählen --</option>
+                    {(() => {
+                      const buildTree = (parentId: string | null, depth: number): any[] => {
+                        let result: any[] = [];
+                        const children = locations.filter(l => (l.parentId || null) === parentId);
+                        children.forEach(child => {
+                          result.push({ ...child, depth });
+                          result = result.concat(buildTree(child.id, depth + 1));
+                        });
+                        return result;
+                      };
+                      return buildTree(null, 0).map(loc => (
+                        <option key={loc.id} value={loc.id}>
+                          {'\u00A0\u00A0\u00A0'.repeat(loc.depth)}{loc.depth > 0 ? '↳ ' : ''}{loc.name}
+                        </option>
+                      ));
+                    })()}
+                  </select>
               </div>
             </div>
 

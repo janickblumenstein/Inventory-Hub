@@ -366,7 +366,7 @@ export default function SuperScanner() {
             </div>
 
             <div className="flex gap-2 mb-4">
-              <input type="url" placeholder="Shop-Link einfügen..." value={pastedUrl} onChange={(e) => setPastedUrl(e.target.value)} className="flex-1 bg-slate-900 border border-slate-700 rounded-xl px-4 text-sm outline-none focus:border-orange-500" />
+              <input type="url" placeholder="Shop-Link einfügen..." value={pastedUrl} onChange={(e) => setPastedUrl(e.target.value)} className="flex-1 bg-white text-slate-900 placeholder-slate-400 border border-slate-300 rounded-xl px-3 py-2 text-sm outline-none focus:border-orange-500" />
               <button onClick={handleUrlSubmit} disabled={!pastedUrl || isProcessing} className="bg-orange-600 text-white px-4 py-2 rounded-xl font-bold disabled:opacity-50 text-sm">Laden</button>
             </div>
             

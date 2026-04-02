@@ -7,6 +7,16 @@ import Link from 'next/link';
 import QRCode from 'react-qr-code';
 import { useWorkspace } from '../../../context/WorkspaceContext';
 
+// 🛒 DAS SHOP-LEXIKON FÜR DIE SCHNELLSUCHE
+const SUPPORTED_SHOPS: Record<string, { name: string, style: string, urlPattern: string }> = {
+  galaxus: { name: 'Galaxus', style: 'text-blue-700 border-blue-200 bg-blue-50 hover:bg-blue-100', urlPattern: 'https://www.galaxus.ch/search?q=' },
+  hornbach: { name: 'Hornbach', style: 'text-orange-700 border-orange-200 bg-orange-50 hover:bg-orange-100', urlPattern: 'https://www.hornbach.ch/s/' },
+  migros: { name: 'Migros', style: 'text-orange-600 border-orange-200 bg-orange-50 hover:bg-orange-100', urlPattern: 'https://www.migros.ch/de/search?query=' },
+  coop: { name: 'Coop', style: 'text-red-700 border-red-200 bg-red-50 hover:bg-red-100', urlPattern: 'https://www.coop.ch/de/search/?text=' },
+  brack: { name: 'Brack.ch', style: 'text-yellow-700 border-yellow-300 bg-yellow-50 hover:bg-yellow-100', urlPattern: 'https://www.brack.ch/search?query=' },
+  obi: { name: 'Obi', style: 'text-orange-700 border-orange-200 bg-orange-50 hover:bg-orange-100', urlPattern: 'https://www.obi.ch/search/' }
+};
+
 export default function ItemDetail({ params }: { params: Promise<{ id: string }> }) {
   const { workspaceId } = useWorkspace();
   const resolvedParams = use(params);
@@ -24,6 +34,10 @@ export default function ItemDetail({ params }: { params: Promise<{ id: string }>
   const [printLoan, setPrintLoan] = useState<any>(null);
   const [ownerName, setOwnerName] = useState('');
   const [lendableTags, setLendableTags] = useState<Record<string, boolean>>({});
+  
+  // 🛒 EINSTELLUNGEN FÜR DIE SHOPS
+  const [preferredShops, setPreferredShops] = useState<string[]>([]);
+  const [customShops, setCustomShops] = useState<{id: string, name: string, urlPattern: string}[]>([]);
 
   const [loading, setLoading] = useState(true);
   const [isUpdating, setIsUpdating] = useState(false);
@@ -38,7 +52,7 @@ export default function ItemDetail({ params }: { params: Promise<{ id: string }>
         const itemData = itemSnap.data();
         setItem({ id: itemSnap.id, ...itemData });
 
-        // Lagerort laden (FIX: Aus dem Workspace laden!)
+        // Lagerort laden
         if (itemData.locationId) {
           const locRef = doc(db, 'workspaces', workspaceId!, 'locations', itemData.locationId);
           const locSnap = await getDoc(locRef);
@@ -51,16 +65,21 @@ export default function ItemDetail({ params }: { params: Promise<{ id: string }>
       const loansSnap = await getDocs(loansQuery);
       setActiveLoans(loansSnap.docs.map(d => ({ id: d.id, ...d.data() })));
 
-      // 3. Settings laden
+      // 3. Settings & Shops laden
       const settingsSnap = await getDoc(doc(db, 'workspaces', workspaceId!, 'settings', 'main'));
       if (settingsSnap.exists()) {
         const data = settingsSnap.data();
         setOwnerName(data.ownerName || 'ShedSync');
+        setPreferredShops(data.preferredShops || ['galaxus', 'hornbach', 'migros', 'coop']);
+        setCustomShops(data.customShops || []);
+
         const tagMap: Record<string, boolean> = {};
         if (data.categories) {
           data.categories.forEach((c: any) => tagMap[c.name] = c.lendable);
         }
         setLendableTags(tagMap);
+      } else {
+        setPreferredShops(['galaxus', 'hornbach', 'migros', 'coop']);
       }
 
     } catch (error) {
@@ -73,7 +92,7 @@ export default function ItemDetail({ params }: { params: Promise<{ id: string }>
   useEffect(() => {
     if (!workspaceId) return;
     fetchItemAndLoans();
-  }, [id, workspaceId]); // FIX: workspaceId als Abhängigkeit
+  }, [id, workspaceId]); 
 
   const handleShareToShoppingList = async () => {
     if (!item) return;
@@ -94,7 +113,6 @@ export default function ItemDetail({ params }: { params: Promise<{ id: string }>
 
     setIsUpdating(true);
     try {
-      // FIX: Im Workspace speichern!
       await updateDoc(doc(db, 'workspaces', workspaceId, 'items', item.id), { quantity: newQty });
       setItem({ ...item, quantity: newQty });
     } catch (error) {
@@ -145,7 +163,6 @@ export default function ItemDetail({ params }: { params: Promise<{ id: string }>
     if (!workspaceId) return;
     setIsUpdating(true);
     try {
-      // FIX: Im Workspace speichern!
       await updateDoc(doc(db, 'workspaces', workspaceId, 'loans', loanId), { 
         status: 'returned',
         returnedDate: new Date().toISOString()
@@ -186,37 +203,87 @@ export default function ItemDetail({ params }: { params: Promise<{ id: string }>
   const availableQty = totalQty - lentQty;
 
   const isLendable = !item.tags?.some((tag: string) => lendableTags[tag] === false);
+  const searchQuery = encodeURIComponent(item.ean || item.name);
 
   return (
     <>
       <div className="p-4 md:p-8 min-h-screen bg-slate-50 pb-20 print:hidden">
-        <div className="max-w-2xl mx-auto">
+        <div className="max-w-3xl mx-auto">
           <Link href="/" className="text-orange-600 hover:underline text-sm font-medium mb-6 inline-block">
             &larr; Zurück zum Dashboard
           </Link>
 
           <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200">
             
-            <div className="flex flex-col sm:flex-row justify-between items-start mb-4 gap-4">
-              <h1 className="text-3xl font-bold text-slate-900 leading-tight">{item.name}</h1>
-              <div className="flex items-center gap-2">
-                <button 
-                  onClick={handleShareToShoppingList}
-                  className="bg-orange-100 hover:bg-orange-200 text-orange-700 px-3 py-2 rounded-lg transition text-sm font-bold flex items-center gap-2"
-                  title="Auf Einkaufsliste setzen"
-                >
-                  🛒 <span className="hidden sm:inline">Einkauf</span>
-                </button>
-                <Link href={`/item/${item.id}/edit`} className="bg-slate-100 hover:bg-slate-200 text-slate-600 px-3 py-2 rounded-lg transition text-sm font-medium">
-                  ✏️ Bearbeiten
-                </Link>
+            <div className="flex flex-col sm:flex-row gap-6 mb-8">
+              {/* BILD BEREICH */}
+              <div className="w-full sm:w-40 h-40 bg-white rounded-xl border border-slate-200 flex items-center justify-center p-2 shrink-0 shadow-sm overflow-hidden">
+                {item.imageUrl ? (
+                  <img src={item.imageUrl} alt={item.name} className="w-full h-full object-contain mix-blend-multiply" />
+                ) : (
+                  <span className="text-5xl opacity-50">📦</span>
+                )}
               </div>
-            </div>
-            
-            <div className="flex flex-wrap gap-2 mb-8">
-              {item.tags?.map((tag: string, i: number) => (
-                <span key={i} className="bg-slate-100 text-slate-600 text-[10px] uppercase font-bold tracking-wider px-2 py-1 rounded">{tag}</span>
-              ))}
+
+              {/* TITEL & INFOS */}
+              <div className="flex-1 flex flex-col items-start">
+                <div className="w-full flex flex-col sm:flex-row justify-between items-start gap-4 mb-2">
+                  <h1 className="text-3xl font-bold text-slate-900 leading-tight">{item.name}</h1>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <button 
+                      onClick={handleShareToShoppingList}
+                      className="bg-orange-100 hover:bg-orange-200 text-orange-700 px-3 py-2 rounded-lg transition text-sm font-bold flex items-center gap-2"
+                      title="Auf Einkaufsliste setzen"
+                    >
+                      🛒 <span className="hidden sm:inline">Einkauf</span>
+                    </button>
+                    <Link href={`/item/${item.id}/edit`} className="bg-slate-100 hover:bg-slate-200 text-slate-600 px-3 py-2 rounded-lg transition text-sm font-medium">
+                      ✏️ Bearbeiten
+                    </Link>
+                  </div>
+                </div>
+
+                {item.ean && (
+                  <p className="text-xs font-mono font-bold text-slate-400 bg-slate-100 px-2 py-1 rounded-md mb-3 border border-slate-200">
+                    EAN: {item.ean}
+                  </p>
+                )}
+                
+                <div className="flex flex-wrap gap-2 mb-4">
+                  {item.tags?.map((tag: string, i: number) => (
+                    <span key={i} className="bg-slate-100 text-slate-600 text-[10px] uppercase font-bold tracking-wider px-2 py-1 rounded">{tag}</span>
+                  ))}
+                </div>
+
+                {/* SHOP LINK / SCHNELLSUCHE */}
+                <div className="w-full mt-auto pt-4 border-t border-slate-100">
+                  {item.productUrl ? (
+                    <a href={item.productUrl} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-2 bg-blue-50 text-blue-700 hover:bg-blue-100 px-4 py-2 rounded-lg text-sm font-bold transition border border-blue-200 shadow-sm">
+                      🔗 Im Shop ansehen
+                    </a>
+                  ) : (
+                    <div>
+                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-2">Kein Shop-Link. Hier online suchen:</p>
+                      <div className="flex flex-wrap gap-2">
+                        {preferredShops.map(shopKey => {
+                          const shop = SUPPORTED_SHOPS[shopKey];
+                          if (!shop) return null;
+                          return (
+                            <a key={shopKey} href={`${shop.urlPattern}${searchQuery}`} target="_blank" rel="noopener noreferrer" className={`text-[10px] px-3 py-1.5 rounded-lg font-bold transition border shadow-sm ${shop.style}`}>
+                              🔍 {shop.name}
+                            </a>
+                          );
+                        })}
+                        {customShops.map(shop => (
+                          <a key={shop.id} href={`${shop.urlPattern}${searchQuery}`} target="_blank" rel="noopener noreferrer" className="text-[10px] px-3 py-1.5 rounded-lg font-bold transition bg-slate-50 text-slate-600 border border-slate-300 hover:bg-slate-100 shadow-sm">
+                            🔍 {shop.name}
+                          </a>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
 
             <div className="bg-slate-50 border border-slate-200 rounded-xl p-5 flex flex-col sm:flex-row items-center justify-between gap-4 mb-6">
@@ -248,7 +315,6 @@ export default function ItemDetail({ params }: { params: Promise<{ id: string }>
                   )}
                 </div>
 
-                {/* Verleih-Formular */}
                 {showLoanForm && (
                   <form onSubmit={handleLendItem} className="p-4 bg-white border-b border-blue-50 space-y-3 animate-fade-in">
                     <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">

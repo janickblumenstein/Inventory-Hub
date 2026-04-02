@@ -9,6 +9,16 @@ import Link from 'next/link';
 import type { CategoryConfig } from '../../../settings/page'; 
 import { useWorkspace } from '../../../../context/WorkspaceContext';
 
+// 🛒 DAS SHOP-LEXIKON
+const SUPPORTED_SHOPS: Record<string, { name: string, style: string, urlPattern: string }> = {
+  galaxus: { name: 'Galaxus', style: 'text-blue-700 border-blue-200 bg-blue-50 hover:bg-blue-100', urlPattern: 'https://www.galaxus.ch/search?q=' },
+  hornbach: { name: 'Hornbach', style: 'text-orange-700 border-orange-200 bg-orange-50 hover:bg-orange-100', urlPattern: 'https://www.hornbach.ch/s/' },
+  migros: { name: 'Migros', style: 'text-orange-600 border-orange-200 bg-orange-50 hover:bg-orange-100', urlPattern: 'https://www.migros.ch/de/search?query=' },
+  coop: { name: 'Coop', style: 'text-red-700 border-red-200 bg-red-50 hover:bg-red-100', urlPattern: 'https://www.coop.ch/de/search/?text=' },
+  brack: { name: 'Brack.ch', style: 'text-yellow-700 border-yellow-300 bg-yellow-50 hover:bg-yellow-100', urlPattern: 'https://www.brack.ch/search?query=' },
+  obi: { name: 'Obi', style: 'text-orange-700 border-orange-200 bg-orange-50 hover:bg-orange-100', urlPattern: 'https://www.obi.ch/search/' }
+};
+
 export default function EditItem({ params }: { params: Promise<{ id: string }> }) {
   const { workspaceId } = useWorkspace();
   const router = useRouter();
@@ -16,11 +26,24 @@ export default function EditItem({ params }: { params: Promise<{ id: string }> }
   const resolvedParams = use(params);
   const id = resolvedParams.id;
   
+  // BASIS DATEN
   const [name, setName] = useState('');
   const [ean, setEan] = useState('');
   const [quantity, setQuantity] = useState(1);
   const [locationId, setLocationId] = useState(''); 
   
+  // 📸 BILD & URL DATEN (NEU)
+  const [imageUrl, setImageUrl] = useState('');
+  const [productUrl, setProductUrl] = useState('');
+  const [pastedUrl, setPastedUrl] = useState('');
+  const [newImageFile, setNewImageFile] = useState<File | null>(null);
+  const [isFetchingMeta, setIsFetchingMeta] = useState(false);
+
+  // SHOP EINSTELLUNGEN (NEU)
+  const [preferredShops, setPreferredShops] = useState<string[]>([]);
+  const [customShops, setCustomShops] = useState<{id: string, name: string, urlPattern: string}[]>([]);
+  
+  // KATEGORIEN & TAGS
   const [categories, setCategories] = useState<CategoryConfig[]>([]);
   const [selectedCategoryId, setSelectedCategoryId] = useState<string>('');
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
@@ -30,6 +53,7 @@ export default function EditItem({ params }: { params: Promise<{ id: string }> }
   const [tagX, setTagX] = useState<number | null>(null);
   const [tagY, setTagY] = useState<number | null>(null);
 
+  // GARANTIE
   const [showWarranty, setShowWarranty] = useState(false);
   const [price, setPrice] = useState('');
   const [purchaseDate, setPurchaseDate] = useState('');
@@ -51,9 +75,14 @@ export default function EditItem({ params }: { params: Promise<{ id: string }> }
 
         const settingsSnap = await getDoc(doc(db, 'workspaces', workspaceId, 'settings', 'main'));
         let loadedCats: CategoryConfig[] = [];
-        if (settingsSnap.exists() && settingsSnap.data().categories) {
-          loadedCats = settingsSnap.data().categories;
-          setCategories(loadedCats);
+        if (settingsSnap.exists()) {
+          const data = settingsSnap.data();
+          if (data.categories) {
+            loadedCats = data.categories;
+            setCategories(loadedCats);
+          }
+          setPreferredShops(data.preferredShops || ['galaxus', 'hornbach', 'migros', 'coop']);
+          setCustomShops(data.customShops || []);
         }
 
         if (id) {
@@ -69,6 +98,8 @@ export default function EditItem({ params }: { params: Promise<{ id: string }> }
             setTagY(data.tagY ?? null);
             setAttributes(data.attributes || {});
             setSelectedTags(data.tags || []);
+            setImageUrl(data.imageUrl || '');
+            setProductUrl(data.productUrl || '');
             
             if (data.category) {
               const matchedCat = loadedCats.find(c => c.name === data.category);
@@ -91,7 +122,32 @@ export default function EditItem({ params }: { params: Promise<{ id: string }> }
       }
     };
     fetchData();
-  }, [id, workspaceId]); // FIX: workspaceId als Abhängigkeit hinzugefügt!
+  }, [id, workspaceId]);
+
+  // 🔥 NEU: Meta-Daten vom Shop-Link laden
+  const handleFetchMeta = async () => {
+    if (!pastedUrl) return;
+    setIsFetchingMeta(true);
+    try {
+      const res = await fetch('/api/fetch-meta', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: pastedUrl })
+      });
+      const data = await res.json();
+      
+      if (data.title) setName(data.title); // Überschreibt den Namen mit dem sauberen Shop-Titel
+      if (data.imageUrl) setImageUrl(data.imageUrl); // Überschreibt das alte Foto
+      setProductUrl(pastedUrl); // Speichert den Link für später
+      setPastedUrl(''); // Feld wieder leeren
+      
+      alert('✅ Bild und Titel erfolgreich vom Shop geladen!');
+    } catch (error) {
+      alert('❌ Fehler beim Laden der Daten vom Shop.');
+    } finally {
+      setIsFetchingMeta(false);
+    }
+  };
 
   const handleCategorySelect = (cat: CategoryConfig) => {
     setSelectedCategoryId(cat.id);
@@ -101,28 +157,20 @@ export default function EditItem({ params }: { params: Promise<{ id: string }> }
 
   const toggleTag = (tag: string) => {
     if (!selectedTags.includes(tag)) {
-      // Tag wird neu hinzugefügt
       setSelectedTags([...selectedTags, tag]);
-      // UX-Magie: Wenn der Name noch leer ist, nimm das Tag als Namen!
-      if (name.trim() === '') {
-        setName(tag);
-      }
+      if (name.trim() === '') setName(tag);
     } else {
-      // Tag wird wieder abgewählt
       setSelectedTags(selectedTags.filter(t => t !== tag));
     }
   };
+
   const handleAddCustomTag = (e: React.KeyboardEvent | React.FocusEvent) => {
     if ((e.type === 'keydown' && (e as React.KeyboardEvent).key !== 'Enter') || !customTagInput.trim()) return;
     e.preventDefault();
-    
     const newTag = customTagInput.trim();
     if (!selectedTags.includes(newTag)) {
       setSelectedTags([...selectedTags, newTag]);
-      // UX-Magie: Auch bei eigenen Tags den Namen füllen, wenn er leer ist
-      if (name.trim() === '') {
-        setName(newTag);
-      }
+      if (name.trim() === '') setName(newTag);
     }
     setCustomTagInput('');
   };
@@ -148,16 +196,25 @@ export default function EditItem({ params }: { params: Promise<{ id: string }> }
     try {
       let finalReceiptUrl = receiptUrl;
       if (showWarranty && receiptFile) {
-        // FIX: Kassenbelege jetzt sicher im Workspace-Ordner ablegen!
         const fileRef = ref(storage, `workspaces/${workspaceId}/receipts/${id}_${Date.now()}`);
         await uploadBytes(fileRef, receiptFile);
         finalReceiptUrl = await getDownloadURL(fileRef);
       }
 
+      let finalImageUrl = imageUrl;
+      if (newImageFile) {
+        // Falls der Nutzer manuell ein neues Foto hochgeladen hat, überschreiben wir das Shop-Bild
+        const imgRef = ref(storage, `workspaces/${workspaceId}/items/${id}_${Date.now()}`);
+        await uploadBytes(imgRef, newImageFile);
+        finalImageUrl = await getDownloadURL(imgRef);
+      }
+
       const itemRef = doc(db, 'workspaces', workspaceId, 'items', id);
       await updateDoc(itemRef, {
         name,
-        ean,
+        ean, // EAN mit speichern!
+        productUrl, // Shop-Link mit speichern!
+        imageUrl: finalImageUrl,
         category: activeCategory.name, 
         tags: selectedTags, 
         quantity,
@@ -170,6 +227,7 @@ export default function EditItem({ params }: { params: Promise<{ id: string }> }
         receiptUrl: showWarranty ? finalReceiptUrl : null
       });
 
+      // Tags erweitern
       const newCustomTags = selectedTags.filter(t => !(activeCategory.tags || []).includes(t));
       if (newCustomTags.length > 0) {
         try {
@@ -207,6 +265,8 @@ export default function EditItem({ params }: { params: Promise<{ id: string }> }
   };
 
   const selectedLoc = locations.find(l => l.id === locationId);
+  // Such-String für die Shop-Buttons (Priorisiert EAN, ansonsten Name)
+  const searchQuery = encodeURIComponent(ean || name);
 
   if (isLoading || !workspaceId) return <div className="min-h-screen bg-slate-50 p-8 text-center text-slate-500 font-medium">Lade Daten...</div>;
 
@@ -223,24 +283,87 @@ export default function EditItem({ params }: { params: Promise<{ id: string }> }
         </div>
         
         <form onSubmit={handleSave} className="space-y-6">
-          <div className="space-y-4">
+          
+          {/* 🔥 NEU: BILD & SHOP-LINK BEREICH */}
+          <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-4">
+            <h2 className="text-[10px] font-bold text-slate-500 uppercase tracking-wider mb-2">Produktbild & Online-Shop</h2>
             
+            <div className="flex gap-4 items-start">
+              <div className="w-20 h-20 bg-white rounded-xl border border-slate-200 flex items-center justify-center p-1 shrink-0 overflow-hidden relative group">
+                {(newImageFile || imageUrl) ? (
+                  <img src={newImageFile ? URL.createObjectURL(newImageFile) : imageUrl} alt="Produkt" className="w-full h-full object-contain" />
+                ) : (
+                  <span className="text-2xl opacity-50">📦</span>
+                )}
+              </div>
+              
+              <div className="flex-1 space-y-2">
+                <p className="text-[10px] font-bold text-slate-400 uppercase">1. Im Shop suchen</p>
+                <div className="flex flex-wrap gap-1.5">
+                  {preferredShops.map(shopKey => {
+                    const shop = SUPPORTED_SHOPS[shopKey];
+                    if (!shop) return null;
+                    return (
+                      <a key={shopKey} href={`${shop.urlPattern}${searchQuery}`} target="_blank" rel="noopener noreferrer" className={`text-[10px] px-2 py-1 rounded font-bold transition border ${shop.style}`}>
+                        🔍 {shop.name}
+                      </a>
+                    );
+                  })}
+                  {customShops.map(shop => (
+                    <a key={shop.id} href={`${shop.urlPattern}${searchQuery}`} target="_blank" rel="noopener noreferrer" className="text-[10px] px-2 py-1 rounded font-bold transition bg-white text-slate-600 border border-slate-300 hover:bg-slate-100">
+                      🔍 {shop.name}
+                    </a>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <div className="pt-2">
+              <p className="text-[10px] font-bold text-slate-400 uppercase mb-1">2. Shop-Link einfügen (Überschreibt Bild & Name)</p>
+              <div className="flex gap-2">
+                <input 
+                  type="url" 
+                  placeholder={productUrl || "https://www.galaxus.ch/..."}
+                  value={pastedUrl}
+                  onChange={(e) => setPastedUrl(e.target.value)}
+                  className="flex-1 bg-white text-slate-900 placeholder-slate-400 border border-slate-300 rounded-xl px-3 py-2 text-sm outline-none focus:border-orange-500"
+                />
+                <button 
+                  type="button"
+                  onClick={handleFetchMeta}
+                  disabled={!pastedUrl || isFetchingMeta}
+                  className="bg-orange-600 text-white px-3 py-2 rounded-xl font-bold disabled:opacity-50 text-xs shadow-sm hover:bg-orange-700"
+                >
+                  {isFetchingMeta ? 'Lädt...' : 'Laden'}
+                </button>
+              </div>
+            </div>
+
+            <div className="pt-2 border-t border-slate-200 mt-2">
+              <p className="text-[10px] font-bold text-slate-400 uppercase mb-1">Oder: Eigenes Foto hochladen</p>
+              <input 
+                type="file" 
+                accept="image/*" 
+                capture="environment" 
+                onChange={(e) => e.target.files && setNewImageFile(e.target.files[0])} 
+                className="text-xs text-slate-600 w-full p-2 bg-white rounded-lg border border-slate-200" 
+              />
+            </div>
+          </div>
+
+
+          <div className="space-y-4 pt-2">
             <div>
               <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Bezeichnung</label>
-              <div>
-              
-              
-              {/* NEU: Dieser relative Wrapper hält das Input und den X-Button zusammen */}
               <div className="relative">
                 <input 
                   type="text" 
                   value={name} 
                   onChange={(e) => setName(e.target.value)} 
-                  className="w-full p-3 pr-10 border border-slate-300 rounded-xl bg-white text-slate-900 outline-none font-bold text-lg focus:border-orange-500 transition" 
+                  className="w-full p-3 pr-10 border border-slate-300 rounded-xl bg-white text-slate-900 outline-none font-bold text-lg focus:border-orange-500 transition shadow-sm" 
                   placeholder="z.B. Makita Flex" 
                   required 
                 />
-                
                 {name && (
                   <button 
                     type="button"
@@ -252,6 +375,17 @@ export default function EditItem({ params }: { params: Promise<{ id: string }> }
                 )}
               </div>
             </div>
+
+            {/* 🔥 NEU: EAN FELD (Wichtig für spätere Scans und die Shop-Suche) */}
+            <div>
+              <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">EAN / Barcode (Optional)</label>
+              <input 
+                type="text" 
+                value={ean} 
+                onChange={(e) => setEan(e.target.value)} 
+                className="w-full p-2.5 border border-slate-300 rounded-xl bg-white text-slate-900 outline-none font-mono text-sm focus:border-orange-500 shadow-sm" 
+                placeholder="Barcode-Nummer" 
+              />
             </div>
 
             <div className="pt-2">

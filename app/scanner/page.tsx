@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState, useRef } from 'react';
-import { Html5QrcodeScanner } from 'html5-qrcode';
 import { db, storage } from '../../lib/firebase';
 import { collection, query, where, getDocs, addDoc } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
@@ -18,16 +17,14 @@ const SUPPORTED_SHOPS: Record<string, { name: string, urlPattern: string, style:
   brack: { name: 'Brack.ch', urlPattern: 'https://www.brack.ch/search?query=', style: 'bg-yellow-900/30 text-yellow-400 border-yellow-800/50' },
   obi: { name: 'Obi', urlPattern: 'https://www.obi.ch/search/', style: 'bg-orange-900/30 text-orange-400 border-orange-800/50' }
 };
-const [userPreferredShops, setUserPreferredShops] = useState<string[]>([]);
-  // 🛒 NEU: State für eigene Shops im Scanner
-  const [customShops, setCustomShops] = useState<{id: string, name: string, urlPattern: string}[]>([]);
 
 export default function SuperScanner() {
   const router = useRouter();
   const { workspaceId } = useWorkspace();
   
-  // EINSTELLUNGEN (Später aus Firebase ladbar)
-  const [userPreferredShops, setUserPreferredShops] = useState<string[]>(['galaxus', 'hornbach', 'migros', 'coop']);
+  // EINSTELLUNGEN
+  const [userPreferredShops, setUserPreferredShops] = useState<string[]>([]);
+  const [customShops, setCustomShops] = useState<{id: string, name: string, urlPattern: string}[]>([]);
 
   // LAGERORTE
   const [locations, setLocations] = useState<any[]>([]);
@@ -74,7 +71,6 @@ export default function SuperScanner() {
         return getDoc(doc(db, 'workspaces', workspaceId, 'settings', 'main')).then(docSnap => {
           if (docSnap.exists()) {
             setUserPreferredShops(docSnap.data().preferredShops || ['galaxus', 'hornbach', 'migros', 'coop']);
-            // 🛒 NEU: Eigene Shops in den Scanner laden
             setCustomShops(docSnap.data().customShops || []);
           } else {
             setUserPreferredShops(['galaxus', 'hornbach', 'migros', 'coop']);
@@ -111,78 +107,87 @@ export default function SuperScanner() {
     setShowScanner(true);
   };
 
-  // 🔥 KAMERA INITIALISIERUNG
+  // 🔥 KAMERA INITIALISIERUNG (Vercel-sicher)
   useEffect(() => {
     if (!workspaceId || !showScanner) return; 
 
-    const scanner = new Html5QrcodeScanner("reader", { fps: 10, qrbox: { width: 250, height: 250 }, rememberLastUsedCamera: true }, false);
+    let scannerInstance: any = null;
 
-    scanner.render(
-      async (decodedText) => {
-        if (isProcessingRef.current) return; 
-        
-        setIsProcessing(true);
-        showToast("Prüfe Datenbank...", "info", 10000);
+    const initializeScanner = async () => {
+      const { Html5QrcodeScanner } = await import('html5-qrcode');
 
-        try {
-          // 1. LAGERORT GESCANNT?
-          const locQuery = query(collection(db, 'workspaces', workspaceId, 'locations'), where('code', '==', decodedText));
-          const locSnap = await getDocs(locQuery);
-          if (!locSnap.empty) {
-            scanner.clear();
-            router.push(`/?scannedLoc=${locSnap.docs[0].id}`); 
-            return;
-          }
+      scannerInstance = new Html5QrcodeScanner("reader", { fps: 10, qrbox: { width: 250, height: 250 }, rememberLastUsedCamera: true }, false);
 
-          // 2. ITEM BEREITS IN DEINER WERKSTATT?
-          const itemQ = query(collection(db, 'workspaces', workspaceId, 'items'), where('ean', '==', decodedText));
-          const querySnapshot = await getDocs(itemQ);
-          if (!querySnapshot.empty) {
-            scanner.clear();
-            router.push(`/item/${querySnapshot.docs[0].id}/edit`); 
-            return;
-          }
+      scannerInstance.render(
+        async (decodedText: string) => {
+          if (isProcessingRef.current) return; 
+          
+          setIsProcessing(true);
+          showToast("Prüfe Datenbank...", "info", 10000);
 
-          // 3. IM NETZ SUCHEN (Gratis APIs)
-          showToast("Suche in globalen Datenbanken...", "info", 10000);
-          const res = await fetch('/api/search-ean', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ ean: decodedText.trim() })
-          });
-          const data = await res.json();
+          try {
+            // 1. LAGERORT GESCANNT?
+            const locQuery = query(collection(db, 'workspaces', workspaceId, 'locations'), where('code', '==', decodedText));
+            const locSnap = await getDocs(locQuery);
+            if (!locSnap.empty) {
+              scannerInstance.clear();
+              router.push(`/?scannedLoc=${locSnap.docs[0].id}`); 
+              return;
+            }
 
-          if (res.ok && data.title) {
-            // ERFOLG: Wir öffnen das Erfolgs-Menü!
-            setUnknownEan(decodedText);
-            setFoundItem(data);
-            setFallbackMode('success');
-            setShowScanner(false);
-            setToastMessage(null);
-            setIsProcessing(false);
-          } else {
-            // FEHLSCHLAG: Wir öffnen das Rettungs-Menü!
+            // 2. ITEM BEREITS IN DEINER WERKSTATT?
+            const itemQ = query(collection(db, 'workspaces', workspaceId, 'items'), where('ean', '==', decodedText));
+            const querySnapshot = await getDocs(itemQ);
+            if (!querySnapshot.empty) {
+              scannerInstance.clear();
+              router.push(`/item/${querySnapshot.docs[0].id}/edit`); 
+              return;
+            }
+
+            // 3. IM NETZ SUCHEN
+            showToast("Suche in globalen Datenbanken...", "info", 10000);
+            const res = await fetch('/api/search-ean', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ ean: decodedText.trim() })
+            });
+            const data = await res.json();
+
+            if (res.ok && data.title) {
+              setUnknownEan(decodedText);
+              setFoundItem(data);
+              setFallbackMode('success');
+              setShowScanner(false);
+              setToastMessage(null);
+              setIsProcessing(false);
+            } else {
+              setUnknownEan(decodedText);
+              setFallbackMode('menu');
+              setShowScanner(false);
+              setToastMessage(null);
+              setIsProcessing(false); 
+            }
+          } catch (error) {
             setUnknownEan(decodedText);
             setFallbackMode('menu');
             setShowScanner(false);
             setToastMessage(null);
-            setIsProcessing(false); 
+            setIsProcessing(false);
           }
-        } catch (error) {
-          setUnknownEan(decodedText);
-          setFallbackMode('menu');
-          setShowScanner(false);
-          setToastMessage(null);
-          setIsProcessing(false);
-        }
-      },
-      (error) => {}
-    );
+        },
+        (error: any) => {} 
+      );
+    };
 
-    return () => { scanner.clear().catch(e => console.error(e)); };
-  }, [workspaceId, router, showScanner]); 
+    initializeScanner();
 
-  // 🔥 SPEICHERN: Mit Shop-Link (Der Meta-Scraper zieht Bilder)
+    return () => { 
+      if (scannerInstance) {
+        scannerInstance.clear().catch((e: any) => console.error(e)); 
+      }
+    };
+  }, [workspaceId, router, showScanner]);
+
   const handleUrlSubmit = async () => {
     if (!pastedUrl || !workspaceId) return;
     setIsProcessing(true);
@@ -204,7 +209,7 @@ export default function SuperScanner() {
         category: '', 
         quantity: 1,
         locationId: selectedLocationRef.current,
-        onShoppingList: onShoppingList, // 🛒 Die Einkaufsliste!
+        onShoppingList: onShoppingList,
         createdAt: new Date().toISOString()
       });
 
@@ -216,7 +221,6 @@ export default function SuperScanner() {
     }
   };
 
-  // 🔥 SPEICHERN: Ohne Link (Direkt aus OpenFoodFacts/UPC)
   const saveDirectly = async () => {
     if (!foundItem || !workspaceId) return;
     setIsProcessing(true);
@@ -230,7 +234,7 @@ export default function SuperScanner() {
         category: '', 
         quantity: 1,
         locationId: selectedLocationRef.current,
-        onShoppingList: onShoppingList, // 🛒 Die Einkaufsliste!
+        onShoppingList: onShoppingList,
         createdAt: new Date().toISOString()
       });
 
@@ -242,7 +246,6 @@ export default function SuperScanner() {
     }
   };
 
-  // 🔥 FOTO FALLBACK (Kamera sauber beenden vorher!)
   const triggerPhoto = () => {
     setShowScanner(false);
     setTimeout(() => fileInputRef.current?.click(), 200);
@@ -348,15 +351,15 @@ export default function SuperScanner() {
                 const shop = SUPPORTED_SHOPS[shopKey];
                 if (!shop) return null;
                 return (
-                  <a key={shopKey} href={`${shop.urlPattern}${unknownEan}`} target="_blank" rel="noopener noreferrer" className={`text-xs py-3 rounded-xl text-center font-bold transition ${shop.style}`}>
+                  <a key={shopKey} href={`${shop.urlPattern}${encodeURIComponent(foundItem.title)}`} target="_blank" rel="noopener noreferrer" className={`text-xs py-3 rounded-xl text-center font-bold transition ${shop.style}`}>
                      {shop.name}
                   </a>
                 );
               })}
               
-              {/* 2. DEINE EIGENEN SHOPS */}
+              {/* 2. DEINE EIGENEN SHOPS (Sucht jetzt auch mit dem Titel!) */}
               {customShops.map(shop => (
-                <a key={shop.id} href={`${shop.urlPattern}${unknownEan}`} target="_blank" rel="noopener noreferrer" className="text-xs py-3 rounded-xl text-center font-bold transition bg-slate-700/50 text-white border-slate-600 hover:bg-slate-700">
+                <a key={shop.id} href={`${shop.urlPattern}${encodeURIComponent(foundItem.title)}`} target="_blank" rel="noopener noreferrer" className="text-xs py-3 rounded-xl text-center font-bold transition bg-slate-700/50 text-white border-slate-600 hover:bg-slate-700">
                    {shop.name}
                 </a>
               ))}

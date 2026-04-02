@@ -218,11 +218,6 @@ export default function SettingsPage() {
               <label className="block text-xs font-semibold text-slate-500 mb-1">Ausgewiesener Eigentümer (Wird auf QR-Kleber gedruckt)</label>
               <input type="text" value={ownerName} onChange={(e) => setOwnerName(e.target.value)} placeholder="z.B. ShedSync HQ oder Janick" className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none font-medium text-slate-800 focus:border-orange-500 transition" />
             </div>
-            <div className="flex items-end">
-              <button onClick={() => saveSettings()} disabled={isSaving} className="w-full sm:w-auto bg-slate-800 text-white font-bold px-6 py-3 rounded-xl hover:bg-slate-700 transition">
-                {isSaving ? 'Speichert...' : 'Speichern'}
-              </button>
-            </div>
           </div>
         </div>
 
@@ -448,6 +443,22 @@ export default function SettingsPage() {
             </form>
           </div>
 
+        </div>
+      </div>
+
+      <div className="fixed bottom-0 left-0 right-0 p-4 bg-white/80 backdrop-blur-md border-t border-slate-200 z-50 shadow-[0_-10px_40px_rgba(0,0,0,0.05)] pb-safe">
+        <div className="max-w-3xl mx-auto flex justify-end">
+          <button 
+            onClick={() => saveSettings()} 
+            disabled={isSaving} 
+            className="w-full sm:w-auto bg-orange-600 text-white font-bold px-8 py-4 rounded-xl hover:bg-orange-700 transition shadow-lg text-lg flex items-center justify-center gap-2 active:scale-95"
+          >
+            {isSaving ? (
+              <span className="animate-pulse">⏳ Speichert...</span>
+            ) : (
+              <>💾 Alle Einstellungen speichern</>
+            )}
+          </button>
         </div>
       </div>
     </div>

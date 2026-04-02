@@ -16,26 +16,23 @@ export default function SuperScanner() {
   const [locations, setLocations] = useState<any[]>([]);
   const [selectedLocation, setSelectedLocation] = useState('');
   
-  // Ref-Trick für den Dropdown-Wert
   const selectedLocationRef = useRef(selectedLocation);
   useEffect(() => { selectedLocationRef.current = selectedLocation; }, [selectedLocation]);
 
   // UI States
   const [isProcessing, setIsProcessing] = useState(false);
-  // Ref-Trick für isProcessing, damit die Kamera nicht bei jedem Rerender neu startet!
   const isProcessingRef = useRef(isProcessing);
   useEffect(() => { isProcessingRef.current = isProcessing; }, [isProcessing]);
 
   const [toastMessage, setToastMessage] = useState<{text: string, type: 'success' | 'info' | 'error'} | null>(null);
   const [unknownEan, setUnknownEan] = useState<string | null>(null);
   
-  // DER KAMERA-RESTART-KEY
-  const [scannerKey, setScannerKey] = useState(0); 
+  // 🔥 NEU: Dieser State kontrolliert, ob der Scanner überhaupt im HTML existiert
+  const [showScanner, setShowScanner] = useState(true); 
 
   const scannerRef = useRef<Html5QrcodeScanner | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Helper-Funktion: Lagerorte hierarchisch einrücken
   const buildLocationTree = (locationsList: any[], parentId: string | null = null, level = 0): any[] => {
     return locationsList
       .filter(loc => (loc.parentId || null) === parentId)
@@ -48,7 +45,6 @@ export default function SuperScanner() {
       }, []);
   };
 
-  // Lagerorte laden und formatieren
   useEffect(() => {
     if (!workspaceId) return;
     const fetchLocations = async () => {
@@ -65,25 +61,18 @@ export default function SuperScanner() {
     setTimeout(() => setToastMessage(null), duration);
   };
 
-  // KAMERA INITIALISIERUNG (Wird durch scannerKey komplett neu gestartet, wenn nötig)
+  // 🔥 KAMERA INITIALISIERUNG: Läuft nur, wenn showScanner = true ist!
   useEffect(() => {
-    if (!workspaceId) return; 
+    if (!workspaceId || !showScanner) return; 
 
-    // Vorherige Instanz sauber aufräumen
-    if (scannerRef.current) {
-      scannerRef.current.clear().catch(e => console.error(e));
-      scannerRef.current = null;
-    }
-
-    scannerRef.current = new Html5QrcodeScanner(
+    const scanner = new Html5QrcodeScanner(
       "reader", 
       { fps: 10, qrbox: { width: 250, height: 250 }, rememberLastUsedCamera: true },
       false
     );
 
-    scannerRef.current.render(
+    scanner.render(
       async (decodedText) => {
-        // Nutzen den Ref, um React Re-Renders zu umgehen
         if (isProcessingRef.current) return; 
         
         setIsProcessing(true);
@@ -91,26 +80,26 @@ export default function SuperScanner() {
         showToast("Prüfe Datenbank...", "info", 10000);
 
         try {
-          // 1. IST ES EIN LAGERORT (QR-Code)?
+          // 1. LAGERORT
           const locQuery = query(collection(db, 'workspaces', workspaceId, 'locations'), where('code', '==', decodedText));
           const locSnap = await getDocs(locQuery);
           if (!locSnap.empty) {
-            scannerRef.current?.clear();
+            scanner.clear();
             router.push(`/?scannedLoc=${locSnap.docs[0].id}`); 
             return;
           }
 
-          // 2. EXISTIERT DAS ITEM BEREITS?
+          // 2. ITEM EXISTIERT
           const itemQ = query(collection(db, 'workspaces', workspaceId, 'items'), where('ean', '==', decodedText));
           const querySnapshot = await getDocs(itemQ);
           if (!querySnapshot.empty) {
-            scannerRef.current?.clear();
+            scanner.clear();
             router.push(`/item/${querySnapshot.docs[0].id}/edit`); 
             return;
           }
 
-          // 3. FLIESSBAND-MODUS: NEUES ITEM IM NETZ SUCHEN!
-          showToast("Suche Produktdaten im Netz...", "info", 10000);
+          // 3. FLIESSBAND (Suche im Netz)
+          showToast("Suche in globalen Datenbanken...", "info", 10000);
           
           const res = await fetch('/api/search-ean', {
             method: 'POST',
@@ -121,7 +110,6 @@ export default function SuperScanner() {
           const data = await res.json();
 
           if (res.ok && data.title) {
-            // ERFOLG!
             await addDoc(collection(db, 'workspaces', workspaceId, 'items'), {
               name: data.title.split('|')[0].trim(),
               ean: decodedText,
@@ -133,11 +121,10 @@ export default function SuperScanner() {
               createdAt: new Date().toISOString()
             });
             
-            showToast(`✅ ${data.title.split('|')[0].substring(0, 25)}... gespeichert!`, 'success');
+            showToast(`✅ ${data.title.substring(0, 25)}... gespeichert!`, 'success');
             setTimeout(() => setIsProcessing(false), 2000);
 
           } else {
-            // FEHLSCHLAG: Kamera hat nichts gefunden
             setUnknownEan(decodedText);
             showToast(`❌ EAN unbekannt. Bitte knipse ein Foto!`, 'error', 5000);
             setIsProcessing(false); 
@@ -152,19 +139,36 @@ export default function SuperScanner() {
       (error) => {}
     );
 
-    return () => {
-      if (scannerRef.current) {
-        scannerRef.current.clear().catch(e => console.error(e));
-        scannerRef.current = null;
-      }
-    };
-  // WICHTIG: scannerKey sorgt dafür, dass dieser Effekt nach einem Foto komplett neu läuft!
-  }, [workspaceId, router, scannerKey]); 
+    scannerRef.current = scanner;
 
-  // FOTO-FALLBACK
+    // Cleanup: Zerstört den Scanner komplett, wenn showScanner auf false geht
+    return () => {
+      scanner.clear().catch(e => console.error(e));
+      scannerRef.current = null;
+    };
+  }, [workspaceId, router, showScanner]); 
+
+  // 🔥 DER TÜRSTEHER: Zerstört die Kamera BEVOR die native Foto-App aufgeht
+  const triggerPhoto = () => {
+    // 1. Barcode-Scanner aus dem HTML entfernen und Kamera freigeben
+    setShowScanner(false);
+    
+    // 2. Kurz warten, bis das OS die Hardware losgelassen hat, dann Foto-App öffnen
+    setTimeout(() => {
+      fileInputRef.current?.click();
+    }, 200);
+  };
+
   const handlePhotoCapture = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file || !workspaceId) return;
+    
+    // Falls der User in der Foto-App auf "Abbrechen" drückt, Kamera wieder starten
+    if (!file) {
+      setShowScanner(true);
+      return;
+    }
+
+    if (!workspaceId) return;
 
     setIsProcessing(true);
     showToast("📸 Lade Foto hoch...", "info", 10000);
@@ -187,22 +191,19 @@ export default function SuperScanner() {
       showToast(`✅ Foto gespeichert! Ab in den Korb.`, 'success');
       setUnknownEan(null);
       
-      // HIER PASSIERT DIE MAGIE: Wir zwingen die Kamera zum kompletten Reboot!
-      setTimeout(() => {
-        setIsProcessing(false);
-        setScannerKey(prev => prev + 1); 
-      }, 1500);
-
     } catch (error) {
       alert("Fehler beim Hochladen des Bildes.");
+    } finally {
       setIsProcessing(false);
-      setScannerKey(prev => prev + 1); // Auch bei Fehler neustarten
+      // 🔥 EGAL OB ERFOLG ODER FEHLER: Jetzt bauen wir die Kamera frisch auf!
+      setTimeout(() => setShowScanner(true), 500);
     }
   };
 
   const cancelFallback = () => {
     setUnknownEan(null);
-    setScannerKey(prev => prev + 1); // Reboot, um das Bild wieder live zu schalten
+    setShowScanner(false);
+    setTimeout(() => setShowScanner(true), 100); // Schneller Reboot
   };
 
   if (!workspaceId) return <div className="min-h-screen bg-slate-900 p-8 text-center text-white">Lade Scanner...</div>;
@@ -242,12 +243,18 @@ export default function SuperScanner() {
       {/* KAMERA BEREICH */}
       <div className="flex-1 relative flex flex-col items-center justify-center bg-black">
         
-        {/* Der Scanner-Container nutzt den scannerKey, um nach einem Foto komplett neu gerendert zu werden */}
-        <div key={scannerKey} className="w-full max-w-md overflow-hidden rounded-3xl relative z-10">
-           <div id="reader" className="w-full bg-black"></div>
-        </div>
+        {/* 🔥 Der Reader wird nur ins HTML gehängt, wenn showScanner true ist! */}
+        {showScanner ? (
+          <div className="w-full max-w-md overflow-hidden rounded-3xl relative z-10">
+             <div id="reader" className="w-full bg-black"></div>
+          </div>
+        ) : (
+          <div className="w-full max-w-md h-64 flex items-center justify-center border border-slate-700 rounded-3xl bg-slate-800">
+             <span className="text-slate-500 animate-pulse">Kamera wird neu gestartet...</span>
+          </div>
+        )}
 
-        {/* Overlay, wenn unbekannte EAN oder Upload lädt */}
+        {/* Overlay */}
         {(unknownEan || (isProcessing && !unknownEan)) && (
           <div className="absolute inset-0 bg-slate-900/90 backdrop-blur-md z-20 flex flex-col items-center justify-center p-6 text-center">
             {unknownEan ? (
@@ -279,8 +286,9 @@ export default function SuperScanner() {
           className="hidden" 
         />
         
+        {/* 🔥 Der Foto-Button ruft jetzt triggerPhoto() auf, was die Kamera sicher beendet! */}
         <button 
-          onClick={() => fileInputRef.current?.click()}
+          onClick={triggerPhoto}
           className={`w-20 h-20 rounded-full border-4 flex items-center justify-center text-3xl shadow-2xl transition-transform active:scale-90 ${
             unknownEan ? 'bg-orange-500 border-orange-200 animate-pulse' : 'bg-slate-700 border-slate-500 hover:bg-slate-600'
           }`}

@@ -8,66 +8,88 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'Keine EAN übergeben' }, { status: 400 });
     }
 
+    // 🚀 STUFE 1: OpenFoodFacts (Der Retter für Ovo, Cola & Co.)
+    try {
+      const offRes = await fetch(`https://world.openfoodfacts.org/api/v0/product/${ean}.json`);
+      const offData = await offRes.json();
+      
+      if (offData.status === 1 && offData.product) {
+        const productName = offData.product.product_name || offData.product.product_name_de || offData.product.generic_name;
+        if (productName) {
+          return NextResponse.json({ 
+            title: productName, 
+            imageUrl: offData.product.image_url || offData.product.image_front_url || '',
+            url: `https://ch.openfoodfacts.org/product/${ean}`,
+            source: 'openfoodfacts'
+          });
+        }
+      }
+    } catch (error) {
+      console.log("OpenFoodFacts übersprungen");
+    }
+
+    // 🚀 STUFE 2: Globale UPC Datenbank (Für Elektronik & Standardware)
+    try {
+      const upcRes = await fetch(`https://api.upcitemdb.com/prod/trial/lookup?upc=${ean}`);
+      const upcData = await upcRes.json();
+      
+      if (upcData.items && upcData.items.length > 0) {
+        const item = upcData.items[0];
+        return NextResponse.json({ 
+          title: item.title, 
+          imageUrl: item.images && item.images.length > 0 ? item.images[0] : null,
+          url: item.offers && item.offers.length > 0 ? item.offers[0].link : '',
+          source: 'upcitemdb'
+        });
+      }
+    } catch (error) {
+      console.log("UPC API übersprungen");
+    }
+
+    // 🚀 STUFE 3: Serper Web-Suche (Der harte Kern für Werkzeug & Galaxus)
     const SERPER_API_KEY = process.env.SERPER_API_KEY?.trim(); 
 
-    if (!SERPER_API_KEY) {
-        return NextResponse.json({ error: 'Serper Key fehlt' }, { status: 500 });
+    if (SERPER_API_KEY) {
+      // Wir zwingen Google, die Nummer exakt auf deinen Shops zu suchen
+      const searchQuery = `"${ean}" site:galaxus.ch OR site:hornbach.ch OR site:obi.ch OR site:brack.ch`;
+      
+      const searchRes = await fetch('https://google.serper.dev/search', {
+        method: 'POST',
+        headers: {
+          'X-API-KEY': SERPER_API_KEY,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ q: searchQuery, gl: 'ch', hl: 'de' })
+      });
+      
+      const searchData = await searchRes.json();
+
+      if (searchData.organic && searchData.organic.length > 0) {
+        const firstResultUrl = searchData.organic[0].link;
+        const fallbackTitle = searchData.organic[0].title;
+
+        // Meta-Spion für das Bild
+        const baseUrl = request.url.split('/api/')[0]; 
+        const metaRes = await fetch(`${baseUrl}/api/fetch-meta`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url: firstResultUrl })
+        });
+        const metaData = await metaRes.json();
+
+        return NextResponse.json({ 
+            title: metaData.title || fallbackTitle, 
+            imageUrl: metaData.imageUrl,
+            url: firstResultUrl, 
+            source: 'serper_web'
+        });
+      }
     }
 
-    // 🚀 NEU: Wir nutzen den /shopping Endpunkt! 
-    // Hier sind EANs nativ hinterlegt, weil die Shops sie direkt an Google übermitteln.
-    const searchRes = await fetch('https://google.serper.dev/shopping', {
-      method: 'POST',
-      headers: {
-        'X-API-KEY': SERPER_API_KEY,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        q: ean, // Einfach die nackte Nummer
-        gl: 'ch', // Zwingend Schweiz
-        hl: 'de'  // Sprache Deutsch
-      })
-    });
-    
-    const searchData = await searchRes.json();
-
-    if (!searchData.shopping || searchData.shopping.length === 0) {
-        return NextResponse.json({ error: 'Nichts im Schweizer Google Shopping gefunden' }, { status: 404 });
-    }
-
-    // Unsere präferierten Shops (in Kleinbuchstaben für den Abgleich)
-    const preferredShops = ['galaxus', 'hornbach', 'obi', 'brack'];
-
-    let bestResult = null;
-
-    // 1. Priorität: Suche in den Shopping-Resultaten nach unseren Lieblings-Shops
-    for (const item of searchData.shopping) {
-        const sourceName = item.source.toLowerCase();
-        // Prüfen, ob der Verkäufer (source) einer unserer Shops ist
-        if (preferredShops.some(shop => sourceName.includes(shop))) {
-            bestResult = item;
-            console.log(`Bingo! Gefunden bei deinem Lieblingsshop: ${item.source}`);
-            break; 
-        }
-    }
-
-    // 2. Fallback: Wenn keiner der Lieblings-Shops das Produkt hat, nehmen wir das allererste (z.B. Coop/Migros für Cola)
-    if (!bestResult) {
-        bestResult = searchData.shopping[0];
-        console.log(`Lieblingsshops hatten es nicht. Fallback auf: ${bestResult.source}`);
-    }
-
-    // Das Schöne an Google Shopping: Wir bekommen das hochauflösende Bild direkt mit! 
-    // Wir brauchen den Meta-Spion (fetch-meta) hier gar nicht mehr!
-    return NextResponse.json({ 
-        title: bestResult.title, 
-        imageUrl: bestResult.imageUrl,
-        url: bestResult.link,
-        source: bestResult.source // Speichern wir aus Spaß mit ab, damit du weisst, woher es kommt
-    });
+    return NextResponse.json({ error: 'Nichts gefunden' }, { status: 404 });
 
   } catch (error) {
     console.error("EAN Search Error:", error);
-    return NextResponse.json({ error: 'Fehler bei der EAN-Suche auf dem Server.' }, { status: 500 });
+    return NextResponse.json({ error: 'Server Fehler' }, { status: 500 });
   }
 }

@@ -9,31 +9,52 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useWorkspace } from '../../context/WorkspaceContext';
 
+// 🛒 DAS MASTER-LEXIKON: Alle unterstützten Shops
+const SUPPORTED_SHOPS: Record<string, { name: string, urlPattern: string, style: string }> = {
+  galaxus: { name: 'Galaxus', urlPattern: 'https://www.galaxus.ch/search?q=', style: 'bg-blue-900/30 text-blue-400 border-blue-800/50' },
+  hornbach: { name: 'Hornbach', urlPattern: 'https://www.hornbach.ch/s/', style: 'bg-orange-900/30 text-orange-400 border-orange-800/50' },
+  migros: { name: 'Migros', urlPattern: 'https://www.migros.ch/de/search?query=', style: 'bg-orange-600/20 text-orange-500 border-orange-500/30' },
+  coop: { name: 'Coop', urlPattern: 'https://www.coop.ch/de/search/?text=', style: 'bg-red-900/30 text-red-400 border-red-800/50' },
+  brack: { name: 'Brack.ch', urlPattern: 'https://www.brack.ch/search?query=', style: 'bg-yellow-900/30 text-yellow-400 border-yellow-800/50' },
+  obi: { name: 'Obi', urlPattern: 'https://www.obi.ch/search/', style: 'bg-orange-900/30 text-orange-400 border-orange-800/50' }
+};
+const [userPreferredShops, setUserPreferredShops] = useState<string[]>([]);
+  // 🛒 NEU: State für eigene Shops im Scanner
+  const [customShops, setCustomShops] = useState<{id: string, name: string, urlPattern: string}[]>([]);
+
 export default function SuperScanner() {
   const router = useRouter();
   const { workspaceId } = useWorkspace();
   
+  // EINSTELLUNGEN (Später aus Firebase ladbar)
+  const [userPreferredShops, setUserPreferredShops] = useState<string[]>(['galaxus', 'hornbach', 'migros', 'coop']);
+
+  // LAGERORTE
   const [locations, setLocations] = useState<any[]>([]);
   const [selectedLocation, setSelectedLocation] = useState('');
-  
   const selectedLocationRef = useRef(selectedLocation);
   useEffect(() => { selectedLocationRef.current = selectedLocation; }, [selectedLocation]);
 
+  // UI STATES
   const [isProcessing, setIsProcessing] = useState(false);
   const isProcessingRef = useRef(isProcessing);
   useEffect(() => { isProcessingRef.current = isProcessing; }, [isProcessing]);
 
   const [toastMessage, setToastMessage] = useState<{text: string, type: 'success' | 'info' | 'error'} | null>(null);
-  const [unknownEan, setUnknownEan] = useState<string | null>(null);
   
-  // 🔥 NEU: Unser Fallback-Status (Welches Menü wird gezeigt?)
-  const [fallbackMode, setFallbackMode] = useState<'none' | 'menu' | 'photo'>('none');
-  const [pastedUrl, setPastedUrl] = useState('');
+  // SCANNER & MENÜ STATES
   const [showScanner, setShowScanner] = useState(true); 
+  const [fallbackMode, setFallbackMode] = useState<'none' | 'menu' | 'success'>('none');
+  const [unknownEan, setUnknownEan] = useState<string | null>(null);
+  const [foundItem, setFoundItem] = useState<{title: string, imageUrl: string, source: string} | null>(null);
+  const [pastedUrl, setPastedUrl] = useState('');
+  
+  // EINKAUFSLISTE
+  const [onShoppingList, setOnShoppingList] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Helper für saubere Lagerort-Einrückung
+  // Helper für Einrückung
   const buildLocationTree = (locationsList: any[], parentId: string | null = null, level = 0): any[] => {
     return locationsList
       .filter(loc => (loc.parentId || null) === parentId)
@@ -45,6 +66,24 @@ export default function SuperScanner() {
         return acc;
       }, []);
   };
+
+  useEffect(() => {
+    if (!workspaceId) return;
+    const fetchSettings = async () => {
+      const docRef = import('firebase/firestore').then(({ doc, getDoc }) => {
+        return getDoc(doc(db, 'workspaces', workspaceId, 'settings', 'main')).then(docSnap => {
+          if (docSnap.exists()) {
+            setUserPreferredShops(docSnap.data().preferredShops || ['galaxus', 'hornbach', 'migros', 'coop']);
+            // 🛒 NEU: Eigene Shops in den Scanner laden
+            setCustomShops(docSnap.data().customShops || []);
+          } else {
+            setUserPreferredShops(['galaxus', 'hornbach', 'migros', 'coop']);
+          }
+        });
+      });
+    };
+    fetchSettings();
+  }, [workspaceId]);
 
   useEffect(() => {
     if (!workspaceId) return;
@@ -62,7 +101,17 @@ export default function SuperScanner() {
     setTimeout(() => setToastMessage(null), duration);
   };
 
-  // KAMERA INITIALISIERUNG
+  const resetScanner = () => {
+    setFallbackMode('none');
+    setUnknownEan(null);
+    setFoundItem(null);
+    setPastedUrl('');
+    setOnShoppingList(false);
+    setIsProcessing(false);
+    setShowScanner(true);
+  };
+
+  // 🔥 KAMERA INITIALISIERUNG
   useEffect(() => {
     if (!workspaceId || !showScanner) return; 
 
@@ -73,11 +122,10 @@ export default function SuperScanner() {
         if (isProcessingRef.current) return; 
         
         setIsProcessing(true);
-        setUnknownEan(null);
         showToast("Prüfe Datenbank...", "info", 10000);
 
         try {
-          // 1. LAGERORT
+          // 1. LAGERORT GESCANNT?
           const locQuery = query(collection(db, 'workspaces', workspaceId, 'locations'), where('code', '==', decodedText));
           const locSnap = await getDocs(locQuery);
           if (!locSnap.empty) {
@@ -86,7 +134,7 @@ export default function SuperScanner() {
             return;
           }
 
-          // 2. ITEM EXISTIERT
+          // 2. ITEM BEREITS IN DEINER WERKSTATT?
           const itemQ = query(collection(db, 'workspaces', workspaceId, 'items'), where('ean', '==', decodedText));
           const querySnapshot = await getDocs(itemQ);
           if (!querySnapshot.empty) {
@@ -95,41 +143,31 @@ export default function SuperScanner() {
             return;
           }
 
-          // 3. FLIESSBAND (Suche in gratis APIs)
+          // 3. IM NETZ SUCHEN (Gratis APIs)
           showToast("Suche in globalen Datenbanken...", "info", 10000);
-          
           const res = await fetch('/api/search-ean', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ ean: decodedText.trim() })
           });
-          
           const data = await res.json();
 
           if (res.ok && data.title) {
-            await addDoc(collection(db, 'workspaces', workspaceId, 'items'), {
-              name: data.title,
-              ean: decodedText,
-              productUrl: data.url || '',
-              imageUrl: data.imageUrl || '',
-              category: '', 
-              quantity: 1,
-              locationId: selectedLocationRef.current,
-              createdAt: new Date().toISOString()
-            });
-            
-            showToast(`✅ ${data.title.substring(0, 25)}... gespeichert!`, 'success');
-            setTimeout(() => setIsProcessing(false), 2000);
-
+            // ERFOLG: Wir öffnen das Erfolgs-Menü!
+            setUnknownEan(decodedText);
+            setFoundItem(data);
+            setFallbackMode('success');
+            setShowScanner(false);
+            setToastMessage(null);
+            setIsProcessing(false);
           } else {
-            // 🔥 Nichts gefunden! Wir öffnen das smarte Fallback-Menü!
+            // FEHLSCHLAG: Wir öffnen das Rettungs-Menü!
             setUnknownEan(decodedText);
             setFallbackMode('menu');
-            setShowScanner(false); // Kamera temporär ausblenden, um Platz zu machen
+            setShowScanner(false);
             setToastMessage(null);
             setIsProcessing(false); 
           }
-
         } catch (error) {
           setUnknownEan(decodedText);
           setFallbackMode('menu');
@@ -144,15 +182,13 @@ export default function SuperScanner() {
     return () => { scanner.clear().catch(e => console.error(e)); };
   }, [workspaceId, router, showScanner]); 
 
-  // 🔥 NEU: URL verarbeiten (Meta-Daten ziehen)
+  // 🔥 SPEICHERN: Mit Shop-Link (Der Meta-Scraper zieht Bilder)
   const handleUrlSubmit = async () => {
     if (!pastedUrl || !workspaceId) return;
-    
     setIsProcessing(true);
     showToast("🔍 Lade Daten vom Shop...", "info", 10000);
 
     try {
-      // Deinen bestehenden Meta-Scraper aufrufen!
       const metaRes = await fetch('/api/fetch-meta', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -161,37 +197,61 @@ export default function SuperScanner() {
       const metaData = await metaRes.json();
 
       await addDoc(collection(db, 'workspaces', workspaceId, 'items'), {
-        name: metaData.title || `Neues Item (${unknownEan})`,
+        name: foundItem ? foundItem.title : (metaData.title || `Neues Item (${unknownEan})`),
         ean: unknownEan || '',
         productUrl: pastedUrl,
-        imageUrl: metaData.imageUrl || '',
+        imageUrl: foundItem ? foundItem.imageUrl : (metaData.imageUrl || ''),
         category: '', 
         quantity: 1,
         locationId: selectedLocationRef.current,
+        onShoppingList: onShoppingList, // 🛒 Die Einkaufsliste!
         createdAt: new Date().toISOString()
       });
 
       showToast(`✅ Gespeichert! Ab in den Korb.`, 'success');
-      
-      // Reset und Kamera neu starten
-      setTimeout(() => {
-        setUnknownEan(null);
-        setFallbackMode('none');
-        setPastedUrl('');
-        setIsProcessing(false);
-        setShowScanner(true);
-      }, 1500);
-
+      setTimeout(resetScanner, 1500);
     } catch (error) {
       showToast(`❌ Fehler beim Laden des Links.`, 'error');
       setIsProcessing(false);
     }
   };
 
-  // 🔥 FOTO FALLBACK (Für Rasenmäher oder wenn der Shop keinen Link hat)
+  // 🔥 SPEICHERN: Ohne Link (Direkt aus OpenFoodFacts/UPC)
+  const saveDirectly = async () => {
+    if (!foundItem || !workspaceId) return;
+    setIsProcessing(true);
+
+    try {
+      await addDoc(collection(db, 'workspaces', workspaceId, 'items'), {
+        name: foundItem.title,
+        ean: unknownEan || '',
+        productUrl: '',
+        imageUrl: foundItem.imageUrl,
+        category: '', 
+        quantity: 1,
+        locationId: selectedLocationRef.current,
+        onShoppingList: onShoppingList, // 🛒 Die Einkaufsliste!
+        createdAt: new Date().toISOString()
+      });
+
+      showToast(`✅ Gespeichert! Ab in den Korb.`, 'success');
+      setTimeout(resetScanner, 1500);
+    } catch (error) {
+      showToast(`❌ Fehler beim Speichern.`, 'error');
+      setIsProcessing(false);
+    }
+  };
+
+  // 🔥 FOTO FALLBACK (Kamera sauber beenden vorher!)
+  const triggerPhoto = () => {
+    setShowScanner(false);
+    setTimeout(() => fileInputRef.current?.click(), 200);
+  };
+
   const handlePhotoCapture = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file || !workspaceId) return;
+    if (!file) { resetScanner(); return; }
+    if (!workspaceId) return;
 
     setIsProcessing(true);
     showToast("📸 Lade Foto hoch...", "info", 10000);
@@ -208,22 +268,15 @@ export default function SuperScanner() {
         category: '', 
         quantity: 1,
         locationId: selectedLocationRef.current,
+        onShoppingList: onShoppingList,
         createdAt: new Date().toISOString()
       });
 
       showToast(`✅ Foto gespeichert! Ab in den Korb.`, 'success');
-      
-      setTimeout(() => {
-        setUnknownEan(null);
-        setFallbackMode('none');
-        setIsProcessing(false);
-        setShowScanner(true);
-      }, 1500);
-
+      setTimeout(resetScanner, 1500);
     } catch (error) {
       showToast("❌ Fehler beim Hochladen.", "error");
-      setIsProcessing(false);
-      setShowScanner(true);
+      setTimeout(resetScanner, 1500);
     }
   };
 
@@ -239,7 +292,7 @@ export default function SuperScanner() {
           <select 
             value={selectedLocation}
             onChange={(e) => setSelectedLocation(e.target.value)}
-            className="w-full bg-slate-700 text-white text-sm p-2 rounded-lg border border-slate-600 outline-none font-mono"
+            className="w-full bg-slate-700 text-white text-sm p-2 rounded-lg border border-slate-600 outline-none font-mono focus:border-orange-500"
           >
             <option value="">Lagerort: Nicht zugewiesen</option>
             {locations.map(loc => <option key={loc.id} value={loc.id}>{loc.displayName}</option>)}
@@ -264,76 +317,114 @@ export default function SuperScanner() {
         
         {/* NORMALER SCANNER */}
         {showScanner && (
-          <div className="w-full max-w-md overflow-hidden rounded-3xl relative z-10">
+          <div className="w-full max-w-md overflow-hidden rounded-3xl relative z-10 border border-slate-700">
              <div id="reader" className="w-full bg-black"></div>
           </div>
         )}
 
-        {/* 🔥 DAS NEUE RETTUNGS-MENÜ */}
+        {/* 🟢 ERFOLGS-MENÜ (EAN ERKANNT) */}
+        {fallbackMode === 'success' && foundItem && (
+          <div className="w-full max-w-md bg-slate-800 p-6 rounded-3xl border border-green-500/30 shadow-2xl animate-fade-in z-20">
+            <div className="flex items-center gap-4 mb-6">
+              <div className="w-16 h-16 bg-white rounded-xl overflow-hidden flex-shrink-0 border border-slate-600 p-1">
+                {foundItem.imageUrl ? <img src={foundItem.imageUrl} className="w-full h-full object-contain" alt="Produkt" /> : <span className="text-3xl text-center w-full h-full flex items-center justify-center">📦</span>}
+              </div>
+              <div>
+                <h2 className="text-lg font-bold line-clamp-2 leading-tight">{foundItem.title}</h2>
+                <p className="text-[10px] text-slate-400 mt-1 uppercase">Gefunden via {foundItem.source}</p>
+              </div>
+            </div>
+
+            {/* Einkaufslisten-Toggle */}
+            <label className="flex items-center gap-3 bg-slate-900 p-3 rounded-xl border border-slate-700 mb-6 cursor-pointer">
+              <input type="checkbox" checked={onShoppingList} onChange={(e) => setOnShoppingList(e.target.checked)} className="w-5 h-5 rounded border-slate-500 text-orange-500 focus:ring-orange-500 bg-slate-800" />
+              <span className="text-sm font-bold">{onShoppingList ? '❤️ Auf Einkaufsliste' : '🤍 Auf Einkaufsliste setzen'}</span>
+            </label>
+
+            <p className="text-[10px] font-bold text-slate-500 uppercase mb-2">Shop-Link ergänzen (optional):</p>
+            <div className="grid grid-cols-2 gap-2 mb-6">
+              {/* 1. Die Standard-Shops */}
+              {userPreferredShops.map(shopKey => {
+                const shop = SUPPORTED_SHOPS[shopKey];
+                if (!shop) return null;
+                return (
+                  <a key={shopKey} href={`${shop.urlPattern}${unknownEan}`} target="_blank" rel="noopener noreferrer" className={`text-xs py-3 rounded-xl text-center font-bold transition ${shop.style}`}>
+                     {shop.name}
+                  </a>
+                );
+              })}
+              
+              {/* 2. DEINE EIGENEN SHOPS */}
+              {customShops.map(shop => (
+                <a key={shop.id} href={`${shop.urlPattern}${unknownEan}`} target="_blank" rel="noopener noreferrer" className="text-xs py-3 rounded-xl text-center font-bold transition bg-slate-700/50 text-white border-slate-600 hover:bg-slate-700">
+                   {shop.name}
+                </a>
+              ))}
+            </div>
+
+            <div className="flex gap-2 mb-4">
+              <input type="url" placeholder="Shop-Link einfügen..." value={pastedUrl} onChange={(e) => setPastedUrl(e.target.value)} className="flex-1 bg-slate-900 border border-slate-700 rounded-xl px-4 text-sm outline-none focus:border-orange-500" />
+              <button onClick={handleUrlSubmit} disabled={!pastedUrl || isProcessing} className="bg-orange-600 text-white px-4 py-2 rounded-xl font-bold disabled:opacity-50 text-sm">Laden</button>
+            </div>
+            
+            <button onClick={saveDirectly} disabled={isProcessing} className="w-full bg-green-600/20 text-green-400 border border-green-500/50 py-3 rounded-xl font-bold hover:bg-green-600/30 transition shadow-lg">
+              Ohne Link speichern
+            </button>
+            <button onClick={resetScanner} className="mt-4 w-full text-xs text-slate-500 text-center uppercase font-bold">Abbrechen</button>
+          </div>
+        )}
+
+        {/* 🟠 RETTUNGS-MENÜ (EAN NICHT GEFUNDEN) */}
         {fallbackMode === 'menu' && unknownEan && (
           <div className="w-full max-w-md bg-slate-800 p-6 rounded-3xl border border-slate-700 shadow-2xl animate-fade-in z-20">
             <h2 className="text-xl font-bold mb-2">Item nicht erkannt 🤷‍♂️</h2>
-            <p className="text-sm text-slate-400 mb-6">Wir haben <span className="font-mono text-orange-400">{unknownEan}</span> nicht in unseren Datenbanken gefunden.</p>
+            <p className="text-sm text-slate-400 mb-6">Wir haben <span className="font-mono text-orange-400">{unknownEan}</span> nicht gefunden.</p>
             
-            <div className="space-y-3">
-              {/* Shop Suche Buttons (Öffnen in neuem Tab) */}
-              <a href={`https://www.galaxus.ch/search?q=${unknownEan}`} target="_blank" rel="noopener noreferrer" className="block w-full text-center bg-blue-900/30 text-blue-400 border border-blue-800/50 py-3 rounded-xl font-bold hover:bg-blue-900/50 transition">
-                🔍 Auf Galaxus suchen
-              </a>
-              <a href={`https://www.hornbach.ch/s/${unknownEan}`} target="_blank" rel="noopener noreferrer" className="block w-full text-center bg-orange-900/30 text-orange-400 border border-orange-800/50 py-3 rounded-xl font-bold hover:bg-orange-900/50 transition">
-                🔍 Auf Hornbach suchen
-              </a>
+            {/* Einkaufslisten-Toggle */}
+            <label className="flex items-center gap-3 bg-slate-900 p-3 rounded-xl border border-slate-700 mb-6 cursor-pointer">
+              <input type="checkbox" checked={onShoppingList} onChange={(e) => setOnShoppingList(e.target.checked)} className="w-5 h-5 rounded border-slate-500 text-orange-500 focus:ring-orange-500 bg-slate-800" />
+              <span className="text-sm font-bold">{onShoppingList ? '❤️ Auf Einkaufsliste' : '🤍 Auf Einkaufsliste setzen'}</span>
+            </label>
+
+            <div className="grid grid-cols-2 gap-2 mb-6">
+              {/* 1. Die Standard-Shops */}
+              {userPreferredShops.map(shopKey => {
+                const shop = SUPPORTED_SHOPS[shopKey];
+                if (!shop) return null;
+                return (
+                  <a key={shopKey} href={`${shop.urlPattern}${unknownEan}`} target="_blank" rel="noopener noreferrer" className={`text-xs py-3 rounded-xl text-center font-bold transition ${shop.style}`}>
+                    🔍 {shop.name}
+                  </a>
+                );
+              })}
+              
+              {/* 2. DEINE EIGENEN SHOPS */}
+              {customShops.map(shop => (
+                <a key={shop.id} href={`${shop.urlPattern}${unknownEan}`} target="_blank" rel="noopener noreferrer" className="text-xs py-3 rounded-xl text-center font-bold transition bg-slate-700/50 text-white border-slate-600 hover:bg-slate-700">
+                  🔍 {shop.name}
+                </a>
+              ))}
             </div>
 
-            <div className="my-6 border-t border-slate-700 relative">
-              <span className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 bg-slate-800 px-3 text-xs text-slate-500 font-bold uppercase">Dann Link hier einfügen</span>
-            </div>
-
-            {/* URL Input */}
             <div className="flex gap-2">
-              <input 
-                type="url" 
-                placeholder="https://www.galaxus.ch/..."
-                value={pastedUrl}
-                onChange={(e) => setPastedUrl(e.target.value)}
-                className="flex-1 bg-slate-900 border border-slate-700 rounded-xl px-4 text-sm outline-none focus:border-orange-500"
-              />
-              <button 
-                onClick={handleUrlSubmit}
-                disabled={!pastedUrl || isProcessing}
-                className="bg-orange-600 text-white px-4 py-3 rounded-xl font-bold disabled:opacity-50"
-              >
-                Laden
-              </button>
+              <input type="url" placeholder="Gefundenen Shop-Link einfügen..." value={pastedUrl} onChange={(e) => setPastedUrl(e.target.value)} className="flex-1 bg-slate-900 border border-slate-700 rounded-xl px-4 text-sm outline-none focus:border-orange-500" />
+              <button onClick={handleUrlSubmit} disabled={!pastedUrl || isProcessing} className="bg-orange-600 text-white px-4 py-3 rounded-xl font-bold disabled:opacity-50 text-sm">Laden</button>
             </div>
 
-            <button 
-              onClick={() => { setFallbackMode('photo'); setTimeout(() => fileInputRef.current?.click(), 100); }}
-              className="mt-6 w-full text-sm text-slate-400 underline text-center"
-            >
-              Nichts gefunden? Doch ein Foto machen.
-            </button>
-            
-            <button 
-              onClick={() => { setFallbackMode('none'); setShowScanner(true); setUnknownEan(null); }}
-              className="mt-2 w-full text-xs text-slate-500 text-center uppercase font-bold"
-            >
-              Abbrechen
-            </button>
+            <button onClick={triggerPhoto} className="mt-6 w-full text-sm text-slate-400 underline text-center">Nichts gefunden? Doch ein Foto machen.</button>
+            <button onClick={resetScanner} className="mt-4 w-full text-xs text-slate-500 text-center uppercase font-bold">Abbrechen</button>
           </div>
         )}
       </div>
 
-      {/* BOTTOM CONTROLS (Foto knipsen ohne Scan) */}
+      {/* BOTTOM CONTROLS (Manuelles Foto knipsen ohne Scan) */}
       <div className="p-8 bg-slate-800 flex flex-col items-center pb-12 z-20">
         <input type="file" accept="image/*" capture="environment" ref={fileInputRef} onChange={handlePhotoCapture} className="hidden" />
         
         {showScanner && (
           <>
-            <button onClick={() => fileInputRef.current?.click()} className="w-20 h-20 rounded-full border-4 flex items-center justify-center text-3xl shadow-2xl transition-transform active:scale-90 bg-slate-700 border-slate-500 hover:bg-slate-600">
-              📷
-            </button>
-            <p className="text-xs text-slate-400 font-bold mt-4 uppercase tracking-wider">Foto knipsen (Ohne Barcode)</p>
+            <button onClick={triggerPhoto} className="w-20 h-20 rounded-full border-4 flex items-center justify-center text-3xl shadow-2xl transition-transform active:scale-90 bg-slate-700 border-slate-500 hover:bg-slate-600">📷</button>
+            <p className="text-xs text-slate-400 font-bold mt-4 uppercase tracking-wider">Ohne Barcode knipsen</p>
           </>
         )}
       </div>

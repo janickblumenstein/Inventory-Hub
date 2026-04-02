@@ -16,6 +16,16 @@ export type CategoryConfig = {
   tags: string[]; 
 };
 
+// 🛒 DAS SHOP-LEXIKON
+const SUPPORTED_SHOPS: Record<string, { name: string, style: string }> = {
+  galaxus: { name: 'Galaxus', style: 'text-blue-500 border-blue-200 bg-blue-50' },
+  hornbach: { name: 'Hornbach', style: 'text-orange-500 border-orange-200 bg-orange-50' },
+  migros: { name: 'Migros', style: 'text-orange-500 border-orange-200 bg-orange-50' },
+  coop: { name: 'Coop', style: 'text-red-500 border-red-200 bg-red-50' },
+  brack: { name: 'Brack.ch', style: 'text-yellow-600 border-yellow-200 bg-yellow-50' },
+  obi: { name: 'Obi', style: 'text-orange-500 border-orange-200 bg-orange-50' }
+};
+
 // Deine detaillierte Bibliothek
 const DEFAULT_CATEGORIES: CategoryConfig[] = [
   { id: 'saegen-trennen', icon: '🪚', name: 'Sägen & Trennen', lendable: true, autoOpenWarranty: true, attributes: ['Leistung'], tags: ["Kappsäge", "Stichsäge", "Handkreissäge", "Tischkreissäge", "Winkelschleifer (Flex)", "Handsäge", "Japan-Säge", "Multitool", "Sägeblatt", "Trennscheibe"] },
@@ -33,8 +43,18 @@ export default function SettingsPage() {
   const { workspaceId } = useWorkspace();
   const [ownerName, setOwnerName] = useState('');
   const [categories, setCategories] = useState<CategoryConfig[]>([]);
+  
+  // 🛒 NEU: State für die ausgewählten Standard-Shops
+  const [preferredShops, setPreferredShops] = useState<string[]>([]);
+  
+  // 🛒 NEU: Eigene Shops des Users (Jetzt richtig innerhalb der Komponente platziert!)
+  const [customShops, setCustomShops] = useState<{id: string, name: string, urlPattern: string}[]>([]);
+  const [newShopName, setNewShopName] = useState('');
+  const [newShopUrl, setNewShopUrl] = useState('');
+  
   const [loading, setLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [toast, setToast] = useState('');
 
   // Formular-States
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -50,10 +70,13 @@ export default function SettingsPage() {
     if (!workspaceId) return;
     const fetchSettings = async () => {
       try {
-        const snap = await getDoc(doc(db, 'workspaces', workspaceId!, 'settings', 'main'));
+        const snap = await getDoc(doc(db, 'workspaces', workspaceId, 'settings', 'main'));
         if (snap.exists()) {
           const data = snap.data();
           setOwnerName(data.ownerName || '');
+          setPreferredShops(data.preferredShops || ['galaxus', 'hornbach', 'migros', 'coop']);
+          setCustomShops(data.customShops || []);
+
           if (data.categories && data.categories.length > 0) {
             const normalized = data.categories.map((c: any) => ({
               ...c,
@@ -63,11 +86,10 @@ export default function SettingsPage() {
             setCategories(normalized);
           } else {
             setCategories(DEFAULT_CATEGORIES);
-            await setDoc(doc(db, 'workspaces', workspaceId!, 'settings', 'main'), { ownerName: data.ownerName || '', categories: DEFAULT_CATEGORIES }, { merge: true });
           }
         } else {
           setCategories(DEFAULT_CATEGORIES);
-          await setDoc(doc(db, 'workspaces', workspaceId!, 'settings', 'main'), { ownerName: '', categories: DEFAULT_CATEGORIES });
+          setPreferredShops(['galaxus', 'hornbach', 'migros', 'coop']);
         }
       } catch (error) {
         console.error("Fehler beim Laden:", error);
@@ -83,13 +105,24 @@ export default function SettingsPage() {
     try {
       await setDoc(doc(db, 'workspaces', workspaceId!, 'settings', 'main'), {
         ownerName,
+        preferredShops, 
+        customShops, 
         categories: updatedCategories
-      });
+      }, { merge: true });
+      
+      setToast('✅ Erfolgreich gespeichert!');
+      setTimeout(() => setToast(''), 3000);
     } catch (error) {
       alert("Fehler beim Speichern");
     } finally {
       setIsSaving(false);
     }
+  };
+
+  const toggleShop = (shopKey: string) => {
+    setPreferredShops(prev => 
+      prev.includes(shopKey) ? prev.filter(k => k !== shopKey) : [...prev, shopKey]
+    );
   };
 
   const handleSaveCategory = (e: React.FormEvent) => {
@@ -151,7 +184,6 @@ export default function SettingsPage() {
     saveSettings(updated);
   };
 
-  // NEU: Die Reset-Funktion für die Standard-Bibliothek
   const restoreDefaults = () => {
     if(confirm("Möchtest du alle Kategorien auf die Standard-Bibliothek zurücksetzen? Deine eigenen Anpassungen gehen verloren!")) {
       setCategories(DEFAULT_CATEGORIES);
@@ -172,6 +204,12 @@ export default function SettingsPage() {
           </Link>
         </div>
 
+        {toast && (
+          <div className="mb-6 bg-green-100 border border-green-200 text-green-800 px-4 py-3 rounded-xl text-center font-bold text-sm animate-fade-in shadow-sm">
+            {toast}
+          </div>
+        )}
+
         {/* ALLGEMEIN */}
         <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 mb-8">
           <h2 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-4">Besitzer & Etiketten</h2>
@@ -185,6 +223,93 @@ export default function SettingsPage() {
                 {isSaving ? 'Speichert...' : 'Speichern'}
               </button>
             </div>
+          </div>
+        </div>
+
+        {/* 🛒 ONLINE-SHOPS */}
+        <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 mb-8">
+          <div className="mb-4">
+            <h2 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-1">🔍 Online-Shops & Einkaufsliste</h2>
+            <p className="text-xs text-slate-500">Wähle, welche Shops dir im Massenscanner zum Suchen und für die Einkaufsliste angeboten werden.</p>
+          </div>
+          
+          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+            {Object.keys(SUPPORTED_SHOPS).map((shopKey) => {
+              const shop = SUPPORTED_SHOPS[shopKey];
+              const isActive = preferredShops.includes(shopKey);
+              
+              return (
+                <label 
+                  key={shopKey} 
+                  className={`flex items-center justify-between p-3 rounded-xl border-2 cursor-pointer transition-all ${
+                    isActive ? shop.style : 'bg-white border-slate-200 text-slate-400 hover:bg-slate-50'
+                  }`}
+                >
+                  <span className={`text-sm font-bold ${isActive ? '' : 'grayscale'}`}>{shop.name}</span>
+                  <input 
+                    type="checkbox" 
+                    className="w-4 h-4 rounded text-orange-500 border-slate-300 focus:ring-orange-500"
+                    checked={isActive} 
+                    onChange={() => toggleShop(shopKey)} 
+                  />
+                </label>
+              );
+            })}
+          </div>
+
+          {/* EIGENE SHOPS HINZUFÜGEN */}
+          <div className="mt-6 border-t border-slate-200 pt-6">
+            <h3 className="text-sm font-bold text-slate-600 mb-3">➕ Eigenen Shop hinzufügen</h3>
+            <div className="flex flex-col sm:flex-row gap-2 items-start sm:items-center">
+              <input 
+                type="text" 
+                placeholder="Name (z.B. Jumbo)" 
+                value={newShopName}
+                onChange={(e) => setNewShopName(e.target.value)}
+                className="w-full sm:w-1/3 p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none text-sm focus:border-orange-500"
+              />
+              <input 
+                type="url" 
+                placeholder="Such-URL (z.B. https://jumbo.ch/search?q=)" 
+                value={newShopUrl}
+                onChange={(e) => setNewShopUrl(e.target.value)}
+                className="w-full sm:flex-1 p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none text-sm font-mono focus:border-orange-500"
+              />
+              <button 
+                type="button"
+                onClick={() => {
+                  if(newShopName && newShopUrl) {
+                    const newShop = { id: `custom_${Date.now()}`, name: newShopName, urlPattern: newShopUrl };
+                    setCustomShops([...customShops, newShop]);
+                    setNewShopName(''); setNewShopUrl('');
+                  }
+                }}
+                className="w-full sm:w-auto bg-slate-800 text-white font-bold px-4 py-3 rounded-xl hover:bg-slate-700 transition"
+              >
+                Hinzufügen
+              </button>
+            </div>
+
+            {/* Liste der eigenen Shops */}
+            {customShops.length > 0 && (
+              <div className="mt-4 space-y-2">
+                {customShops.map(shop => (
+                  <div key={shop.id} className="flex justify-between items-center bg-slate-50 border border-slate-200 p-3 rounded-xl">
+                    <div>
+                      <p className="font-bold text-sm text-slate-800">{shop.name}</p>
+                      <p className="text-[10px] text-slate-500 font-mono truncate max-w-[200px] sm:max-w-xs">{shop.urlPattern}</p>
+                    </div>
+                    <button 
+                      type="button"
+                      onClick={() => setCustomShops(customShops.filter(s => s.id !== shop.id))}
+                      className="text-red-500 hover:bg-red-50 p-2 rounded-lg transition"
+                    >
+                      🗑️
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
 
@@ -307,7 +432,6 @@ export default function SettingsPage() {
                   )}
                 </div>
                 
-                {/* DER WICHTIGE RESET BUTTON */}
                 {!editingId && (
                   <div className="text-center mt-2">
                     <button 

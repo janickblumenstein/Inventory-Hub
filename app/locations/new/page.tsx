@@ -111,14 +111,31 @@ export default function NewLocation() {
           </div>
 
           <div className="border-t border-slate-100 pt-6 mt-2">
-            <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Foto des Ortes</label>
-            <input 
-              type="file" 
-              accept="image/*"
-              onChange={handleImageChange}
-              className="block w-full text-sm text-slate-500 file:mr-4 file:py-2.5 file:px-4 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-orange-50 file:text-orange-700 hover:file:bg-orange-100 cursor-pointer"
-              required
-            />
+            <p className="block text-xs font-bold text-slate-500 uppercase mb-2">
+              Foto des Ortes <span className="text-orange-500">*</span>
+            </p>
+            <div className="flex gap-2">
+              <label className="flex-1 bg-orange-50 border border-orange-200 text-orange-800 text-xs font-bold py-3 px-3 rounded-lg text-center cursor-pointer hover:bg-orange-100 transition shadow-sm">
+                📷 Kamera
+                <input 
+                  type="file" 
+                  accept="image/*" 
+                  capture="environment" 
+                  onChange={handleImageChange} 
+                  className="hidden" 
+                />
+              </label>
+              <label className="flex-1 bg-orange-50 border border-orange-200 text-orange-800 text-xs font-bold py-3 px-3 rounded-lg text-center cursor-pointer hover:bg-orange-100 transition shadow-sm">
+                🖼️ Galerie
+                <input 
+                  type="file" 
+                  accept="image/*" 
+                  onChange={handleImageChange} 
+                  className="hidden" 
+                />
+              </label>
+            </div>
+            {/* Optional: Hier kannst du den Namen der ausgewählten Datei anzeigen, falls gewünscht */}
           </div>
 
           {previewUrl && (

@@ -150,10 +150,17 @@ export default function LocationsManager() {
               </select>
             </div>
 
-            <div className="pt-2">
-              <label className="block text-xs font-semibold text-slate-500 mb-1">Foto vom Ort (Optional)</label>
-              <input type="file" accept="image/*" capture="environment" onChange={(e) => e.target.files && setImageFile(e.target.files[0])} className="text-xs text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-orange-50 file:text-orange-700 file:font-bold hover:file:bg-orange-100 cursor-pointer" />
-            </div>
+            <p className="text-[10px] font-bold text-slate-400 uppercase mb-1">Eigenes Foto</p>
+<div className="flex gap-2">
+  <label className="flex-1 bg-white border border-slate-300 text-slate-700 text-xs font-bold py-2.5 px-3 rounded-lg text-center cursor-pointer hover:bg-slate-50 transition shadow-sm">
+    📷 Kamera
+    <input type="file" accept="image/*" capture="environment" onChange={(e) => e.target.files && setImageFile(e.target.files[0])} className="hidden" />
+  </label>
+  <label className="flex-1 bg-white border border-slate-300 text-slate-700 text-xs font-bold py-2.5 px-3 rounded-lg text-center cursor-pointer hover:bg-slate-50 transition shadow-sm">
+    🖼️ Galerie
+    <input type="file" accept="image/*" onChange={(e) => e.target.files && setImageFile(e.target.files[0])} className="hidden" />
+  </label>
+</div>
 
             <button type="submit" disabled={isSaving} className="w-full bg-slate-800 text-white font-bold py-3 rounded-xl hover:bg-slate-900 transition mt-2 shadow-sm disabled:opacity-50">
               {isSaving ? 'Speichere...' : '+ Ort anlegen'}

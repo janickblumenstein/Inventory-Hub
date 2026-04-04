@@ -313,13 +313,17 @@ export default function NewItem() {
             </div>
 
             <div className="pt-2 border-t border-slate-200 mt-2">
-              <p className="text-[10px] font-bold text-slate-400 uppercase mb-1">Oder: Eigenes Foto hochladen</p>
-              <input 
-                type="file" 
-                accept="image/*"
-                onChange={(e) => e.target.files && setNewImageFile(e.target.files[0])} 
-                className="text-xs text-slate-600 w-full p-2 bg-white rounded-lg border border-slate-200" 
-              />
+              <p className="text-[10px] font-bold text-slate-400 uppercase mb-1">Oder: Eigenes Foto</p>
+                <div className="flex gap-2">
+                  <label className="flex-1 bg-white border border-slate-300 text-slate-700 text-xs font-bold py-2.5 px-3 rounded-lg text-center cursor-pointer hover:bg-slate-50 transition shadow-sm">
+                    📷 Kamera
+                    <input type="file" accept="image/*" capture="environment" onChange={(e) => e.target.files && setNewImageFile(e.target.files[0])} className="hidden" />
+                  </label>
+                  <label className="flex-1 bg-white border border-slate-300 text-slate-700 text-xs font-bold py-2.5 px-3 rounded-lg text-center cursor-pointer hover:bg-slate-50 transition shadow-sm">
+                    🖼️ Galerie
+                    <input type="file" accept="image/*" onChange={(e) => e.target.files && setNewImageFile(e.target.files[0])} className="hidden" />
+                  </label>
+                </div>
             </div>
           </div>
 

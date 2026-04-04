@@ -173,8 +173,7 @@ export default function EditLocation({ params }: { params: Promise<{ id: string 
             <label className="block text-xs font-bold text-slate-500 uppercase mb-2">Neues Foto aufnehmen (Optional)</label>
             <input 
               type="file" 
-              accept="image/*" 
-              capture="environment" 
+              accept="image/*"
               onChange={handleImageChange}
               className="block w-full text-sm text-slate-500 file:mr-4 file:py-2.5 file:px-4 file:rounded-lg file:border-0 file:text-xs file:font-bold file:bg-orange-50 file:text-orange-700 hover:file:bg-orange-100 cursor-pointer"
             />

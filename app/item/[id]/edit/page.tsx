@@ -350,8 +350,7 @@ export default function EditItem({ params }: { params: Promise<{ id: string }> }
               <p className="text-[10px] font-bold text-slate-400 uppercase mb-1">Oder: Eigenes Foto hochladen</p>
               <input 
                 type="file" 
-                accept="image/*" 
-                capture="environment" 
+                accept="image/*"
                 onChange={(e) => e.target.files && setNewImageFile(e.target.files[0])} 
                 className="text-xs text-slate-600 w-full p-2 bg-white rounded-lg border border-slate-200" 
               />

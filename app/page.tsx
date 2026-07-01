@@ -252,7 +252,11 @@ export default function Dashboard() {
     if (selected.length === 0) return;
 
     const handled = await tryPrintNative(
-      selected.map(i => ({ id: i.id, name: i.name })),
+      selected.map(i => ({
+        id: i.id,
+        name: i.name,
+        locationCode: locations.find(l => l.id === i.locationId)?.code,
+      })),
       ownerName,
       brotherPrinter,
       window.location.origin
@@ -280,6 +284,21 @@ export default function Dashboard() {
     if(confirm("Möchtest du die Werkstatt wirklich verlassen?")) {
       localStorage.removeItem('shedsync_workspace');
       window.location.reload();
+    }
+  };
+
+  // 📋 Ganze Einkaufsliste als Text kopieren (für Bring!, WhatsApp etc.)
+  const handleCopyShoppingList = async () => {
+    const list = items
+      .filter(i => i.onShoppingList)
+      .map(i => `${i.quantity || 1}x ${i.name || 'Item'}`)
+      .join('\n');
+    if (!list) return;
+    try {
+      await navigator.clipboard.writeText(list);
+      alert(`✅ Einkaufsliste kopiert (${shoppingItemsCount} Positionen).\n\nJetzt einfach in Bring!, WhatsApp o.ä. einfügen.`);
+    } catch {
+      alert('Kopieren fehlgeschlagen.');
     }
   };
 
@@ -420,8 +439,15 @@ export default function Dashboard() {
           </button>
         </div>
 
-        {/* MIGRATIONS-HINWEIS */}
-        {/* ... */}
+        {/* 📋 EINKAUFSLISTE TEILEN */}
+        {activeTab === 'shopping' && shoppingItemsCount > 0 && (
+          <button
+            onClick={handleCopyShoppingList}
+            className="w-full mb-6 bg-white border border-slate-200 hover:border-orange-300 text-slate-700 font-bold py-3 rounded-xl shadow-sm transition flex items-center justify-center gap-2"
+          >
+            📋 Ganze Liste kopieren <span className="text-xs font-normal text-slate-400">(für Bring!, WhatsApp …)</span>
+          </button>
+        )}
 
         {scannedLocationFilter && (
           <div className="bg-orange-100 border border-orange-200 text-orange-900 p-4 rounded-xl flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-6 shadow-sm animate-fade-in">
@@ -720,6 +746,9 @@ export default function Dashboard() {
           <QRCode value={`${typeof window !== 'undefined' ? window.location.origin : ''}/item/${it.id}`} size={64} level="M" />
           <div className="text-left min-w-0">
             <p className="text-sm font-black uppercase tracking-tight text-black leading-tight break-words">{it.name || 'Item'}</p>
+            {locations.find(l => l.id === it.locationId)?.code && (
+              <p className="text-[9px] font-mono text-black mt-0.5">{locations.find(l => l.id === it.locationId)?.code}</p>
+            )}
             {ownerName && <p className="text-[9px] font-bold text-black mt-0.5">{ownerName}</p>}
           </div>
         </div>

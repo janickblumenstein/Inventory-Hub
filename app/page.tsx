@@ -10,7 +10,6 @@ export default function Dashboard() {
   // 1. WORKSPACE LOGIK
   const { workspaceId, setWorkspaceId, isLoading: isWorkspaceLoading } = useWorkspace();
   const [loginInput, setLoginInput] = useState('');
-  const [isMigrating, setIsMigrating] = useState(false);
 
   // 2. DASHBOARD STATES
   const [items, setItems] = useState<any[]>([]);
@@ -65,7 +64,7 @@ export default function Dashboard() {
         initialExpanded[getRootLocationName(item.locationId, locList)] = true;
         initialExpanded[item.category || 'ALLGEMEIN'] = true;
       });
-      setExpandedGroups({});
+      setExpandedGroups(initialExpanded);
     } catch (error) {
       console.error("Fehler beim Laden der Workspace-Daten:", error);
     } finally {
@@ -86,44 +85,6 @@ export default function Dashboard() {
       }
     }
   }, [workspaceId]);
-
-  // MIGRATIONS-SKRIPT
-  const handleMigration = async () => {
-    if (!workspaceId) return;
-    if (!confirm("🚨 ACHTUNG: Möchtest du wirklich alle alten Daten aus dem Hauptverzeichnis in diesen Workspace kopieren? Mache das nur 1x!")) return;
-    
-    setIsMigrating(true);
-    try {
-      const targetWorkspace = doc(db, 'workspaces', workspaceId);
-      const batch = writeBatch(db);
-      
-      const oldItems = await getDocs(collection(db, 'workspaces', workspaceId!, 'items'));
-      oldItems.forEach(docSnap => {
-        const newRef = doc(collection(targetWorkspace, 'items'), docSnap.id);
-        batch.set(newRef, docSnap.data());
-      });
-
-      const oldLocs = await getDocs(collection(db, 'workspaces', workspaceId!, 'locations'));
-      oldLocs.forEach(docSnap => {
-        const newRef = doc(collection(targetWorkspace, 'locations'), docSnap.id);
-        batch.set(newRef, docSnap.data());
-      });
-
-      const oldSettings = await getDoc(doc(db, 'workspaces', workspaceId!, 'settings', 'main'));
-      if (oldSettings.exists()) {
-        batch.set(doc(targetWorkspace, 'settings', 'main'), oldSettings.data());
-      }
-
-      await batch.commit();
-      alert("✅ Migration erfolgreich! Lade Seite neu...");
-      fetchData();
-    } catch (e) {
-      console.error(e);
-      alert("Fehler bei der Migration.");
-    } finally {
-      setIsMigrating(false);
-    }
-  };
 
   // 🔥 NEU: Tab-Spezifische Filterung
   const inboxItemsCount = items.filter(i => !i.category || i.category.trim() === '').length;

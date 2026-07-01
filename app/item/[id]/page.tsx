@@ -33,7 +33,7 @@ export default function ItemDetail({ params }: { params: Promise<{ id: string }>
 
   const [printLoan, setPrintLoan] = useState<any>(null);
   const [ownerName, setOwnerName] = useState('');
-  const [lendableTags, setLendableTags] = useState<Record<string, boolean>>({});
+  const [lendableCategories, setLendableCategories] = useState<Record<string, boolean>>({});
   
   // 🛒 EINSTELLUNGEN FÜR DIE SHOPS
   const [preferredShops, setPreferredShops] = useState<string[]>([]);
@@ -73,11 +73,11 @@ export default function ItemDetail({ params }: { params: Promise<{ id: string }>
         setPreferredShops(data.preferredShops || ['galaxus', 'hornbach', 'migros', 'coop']);
         setCustomShops(data.customShops || []);
 
-        const tagMap: Record<string, boolean> = {};
+        const categoryMap: Record<string, boolean> = {};
         if (data.categories) {
-          data.categories.forEach((c: any) => tagMap[c.name] = c.lendable);
+          data.categories.forEach((c: any) => categoryMap[c.name] = c.lendable);
         }
-        setLendableTags(tagMap);
+        setLendableCategories(categoryMap);
       } else {
         setPreferredShops(['galaxus', 'hornbach', 'migros', 'coop']);
       }
@@ -202,7 +202,7 @@ export default function ItemDetail({ params }: { params: Promise<{ id: string }>
   const lentQty = activeLoans.reduce((sum, loan) => sum + loan.quantity, 0);
   const availableQty = totalQty - lentQty;
 
-  const isLendable = !item.tags?.some((tag: string) => lendableTags[tag] === false);
+  const isLendable = lendableCategories[item.category] !== false;
   const searchQuery = encodeURIComponent(item.ean || item.name);
 
   return (

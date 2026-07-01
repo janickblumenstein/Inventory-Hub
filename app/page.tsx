@@ -9,6 +9,16 @@ import QRCode from 'react-qr-code';
 import { useWorkspace } from '../context/WorkspaceContext';
 import { tryPrintNative } from '../lib/brotherPrint';
 
+// Such-URLs der Standard-Shops (für den Schnell-Link in der Einkaufsliste)
+const SHOP_SEARCH_URLS: Record<string, string> = {
+  galaxus: 'https://www.galaxus.ch/search?q=',
+  hornbach: 'https://www.hornbach.ch/s/',
+  migros: 'https://www.migros.ch/de/search?query=',
+  coop: 'https://www.coop.ch/de/search/?text=',
+  brack: 'https://www.brack.ch/search?query=',
+  obi: 'https://www.obi.ch/search/',
+};
+
 export default function Dashboard() {
   const router = useRouter();
   // 1. WORKSPACE LOGIK
@@ -22,6 +32,7 @@ export default function Dashboard() {
   const [categories, setCategories] = useState<any[]>([]);
   const [ownerName, setOwnerName] = useState('');
   const [brotherPrinter, setBrotherPrinter] = useState<any>(null);
+  const [preferredShops, setPreferredShops] = useState<string[]>(['galaxus']);
   const [printItems, setPrintItems] = useState<any[]>([]);
   
   // 🔥 NEU: Tab Navigation
@@ -58,6 +69,7 @@ export default function Dashboard() {
         if (settingsData.categories) setCategories(settingsData.categories);
         setOwnerName(settingsData.ownerName || '');
         setBrotherPrinter(settingsData.brotherPrinter || null);
+        setPreferredShops(settingsData.preferredShops || ['galaxus']);
       }
 
       const itemsQuery = query(collection(workspaceRef, 'items'), orderBy('createdAt', 'desc'));
@@ -289,6 +301,52 @@ export default function Dashboard() {
     }
   };
 
+  // ➕➖ Menge direkt in der Liste ändern (Einkaufs-Tab & Bestandspflege).
+  // Fällt der Bestand auf/unter den Mindestbestand, automatisch auf die Einkaufsliste.
+  const changeItemQuantity = async (itemId: string, delta: number, e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!workspaceId) return;
+    const item = items.find(i => i.id === itemId);
+    if (!item) return;
+    const newQty = Math.max(0, (Number(item.quantity) || 0) + delta);
+
+    const hitsMinimum = item.minQuantity != null && newQty <= Number(item.minQuantity) && !item.onShoppingList;
+    setItems(prev => prev.map(i => i.id === itemId ? { ...i, quantity: newQty, onShoppingList: hitsMinimum ? true : i.onShoppingList } : i));
+    try {
+      const update: any = { quantity: newQty };
+      if (hitsMinimum) update.onShoppingList = true;
+      await updateDoc(doc(db, 'workspaces', workspaceId, 'items', itemId), update);
+    } catch {
+      alert('Fehler beim Speichern der Menge.');
+    }
+  };
+
+  // ⚠️ Items unter Mindestbestand, die noch nicht auf der Einkaufsliste sind
+  const lowStockItems = useMemo(
+    () => items.filter(i => i.minQuantity != null && (Number(i.quantity) || 0) <= Number(i.minQuantity) && !i.onShoppingList),
+    [items]
+  );
+
+  const handleAddLowStockToShopping = async () => {
+    if (!workspaceId || lowStockItems.length === 0) return;
+    try {
+      const batch = writeBatch(db);
+      lowStockItems.forEach(i => batch.update(doc(db, 'workspaces', workspaceId, 'items', i.id), { onShoppingList: true }));
+      await batch.commit();
+      setItems(prev => prev.map(i => lowStockItems.some(l => l.id === i.id) ? { ...i, onShoppingList: true } : i));
+    } catch {
+      alert('Fehler beim Aktualisieren.');
+    }
+  };
+
+  // 🔍 Schnell-Link in den Shop: gespeicherter Produktlink oder Suche im Lieblings-Shop
+  const getShopUrl = (item: any): string => {
+    if (item.productUrl) return item.productUrl;
+    const pattern = SHOP_SEARCH_URLS[preferredShops[0]] || SHOP_SEARCH_URLS.galaxus;
+    return `${pattern}${encodeURIComponent(item.name || '')}`;
+  };
+
   // 📋 Ganze Einkaufsliste als Text kopieren (für Bring!, WhatsApp etc.)
   const handleCopyShoppingList = async () => {
     const list = items
@@ -392,6 +450,7 @@ export default function Dashboard() {
             
             {!isSelectionMode && (
               <>
+                <Link href="/purchases" className="p-2 sm:p-2.5 bg-slate-800 hover:bg-slate-700 rounded-lg text-lg transition" title="Käufe & Garantie">🧾</Link>
                 <Link href="/loans" className="p-2 sm:p-2.5 bg-slate-800 hover:bg-slate-700 rounded-lg text-lg transition" title="Verleih">🤝</Link>
                 <Link href="/locations" className="p-2 sm:p-2.5 bg-slate-800 hover:bg-slate-700 rounded-lg text-lg transition" title="Lagerorte">🏗️</Link>
                 <Link href="/scanner" className="p-2 sm:p-2.5 bg-slate-800 hover:bg-slate-700 rounded-lg text-lg transition" title="Scanner">📷</Link>
@@ -440,6 +499,22 @@ export default function Dashboard() {
             )}
           </button>
         </div>
+
+        {/* ⚠️ NACHSCHUB-WARNUNG (Mindestbestand unterschritten) */}
+        {activeTab === 'inventory' && lowStockItems.length > 0 && (
+          <div className="bg-red-50 border border-red-200 text-red-900 p-4 rounded-xl flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-6 shadow-sm">
+            <span className="text-sm font-bold">
+              ⚠️ {lowStockItems.length} {lowStockItems.length === 1 ? 'Item ist' : 'Items sind'} unter dem Mindestbestand:
+              <span className="font-normal"> {lowStockItems.slice(0, 3).map(i => i.name).join(', ')}{lowStockItems.length > 3 ? ' …' : ''}</span>
+            </span>
+            <button
+              onClick={handleAddLowStockToShopping}
+              className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg text-xs font-bold shadow-sm transition whitespace-nowrap"
+            >
+              🛒 Auf Einkaufsliste
+            </button>
+          </div>
+        )}
 
         {/* 📋 EINKAUFSLISTE TEILEN */}
         {activeTab === 'shopping' && shoppingItemsCount > 0 && (
@@ -581,6 +656,9 @@ export default function Dashboard() {
                             <div className="flex-1 min-w-0">
                               <h3 className={`font-bold truncate transition flex items-center gap-2 ${isSelected ? 'text-orange-900' : 'text-slate-900 group-hover:text-orange-700'}`}>
                                 {item.name || 'Unbenanntes Item'}
+                                {item.minQuantity != null && (Number(item.quantity) || 0) <= Number(item.minQuantity) && (
+                                  <span className="text-[9px] bg-red-100 text-red-700 px-1.5 py-0.5 rounded font-bold border border-red-200 shrink-0">⚠️ Nachschub</span>
+                                )}
                               </h3>
                               
                               {item.ean && <p className="text-[10px] text-slate-500 font-mono mt-0.5">EAN: {item.ean}</p>}
@@ -627,9 +705,39 @@ export default function Dashboard() {
                                 </button>
                               )}
 
-                              <span className={`font-bold px-3 py-1 rounded-md border transition ${isSelected ? 'bg-orange-200 border-orange-300 text-orange-900' : 'bg-slate-100 text-slate-800 border-slate-200'}`}>
-                                {item.quantity}x
-                              </span>
+                              {activeTab === 'shopping' && !isSelectionMode ? (
+                                <div className="flex items-center gap-1">
+                                  <button
+                                    onClick={(e) => changeItemQuantity(item.id, -1, e)}
+                                    className="w-8 h-8 flex items-center justify-center bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded-md text-slate-600 font-bold transition"
+                                    title="Menge verringern"
+                                  >−</button>
+                                  <span className="font-bold px-2 py-1 rounded-md border bg-slate-100 text-slate-800 border-slate-200 min-w-[42px] text-center">
+                                    {item.quantity}x
+                                  </span>
+                                  <button
+                                    onClick={(e) => changeItemQuantity(item.id, 1, e)}
+                                    className="w-8 h-8 flex items-center justify-center bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded-md text-slate-600 font-bold transition"
+                                    title="Menge erhöhen"
+                                  >+</button>
+                                </div>
+                              ) : (
+                                <span className={`font-bold px-3 py-1 rounded-md border transition ${isSelected ? 'bg-orange-200 border-orange-300 text-orange-900' : 'bg-slate-100 text-slate-800 border-slate-200'}`}>
+                                  {item.quantity}x
+                                </span>
+                              )}
+
+                              {activeTab === 'shopping' && !isSelectionMode && (
+                                <a
+                                  href={getShopUrl(item)}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  onClick={(e) => e.stopPropagation()}
+                                  className="text-[10px] font-bold text-blue-700 bg-blue-50 border border-blue-200 px-2 py-1 rounded hover:bg-blue-100 transition"
+                                >
+                                  🔍 {item.productUrl ? 'Zum Produkt' : 'Im Shop suchen'}
+                                </a>
+                              )}
 
                               {activeTab === 'inbox' && !isSelectionMode && (
                                 <span className="text-[10px] bg-orange-100 text-orange-700 px-2 py-1 rounded font-bold">✏️ Einsortieren</span>

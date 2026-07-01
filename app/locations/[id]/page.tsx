@@ -6,7 +6,10 @@ import { doc, getDoc, collection, query, where, getDocs, writeBatch, updateDoc, 
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import QRCode from 'react-qr-code';
 import { useWorkspace } from '../../../context/WorkspaceContext';
+import { tryPrintLocationsNative } from '../../../lib/brotherPrint';
+import { buildLocationLabelUrl } from '../../../lib/labelImage';
 
 export default function LocationHub({ params }: { params: Promise<{ id: string }> }) {
   const router = useRouter();
@@ -24,8 +27,11 @@ export default function LocationHub({ params }: { params: Promise<{ id: string }
   const [selectedChips, setSelectedChips] = useState<Set<string>>(new Set());
   const [isGenerating, setIsGenerating] = useState(false);
   
-  const [categories, setCategories] = useState<any[]>([]); 
+  const [categories, setCategories] = useState<any[]>([]);
   const [selectedCategoryId, setSelectedCategoryId] = useState<string>("");
+  const [ownerName, setOwnerName] = useState('');
+  const [brotherPrinter, setBrotherPrinter] = useState<any>(null);
+  const [printFallback, setPrintFallback] = useState(false);
 
   // 📍 MARKER-STUDIO STATES
   const [showMarkerStudio, setShowMarkerStudio] = useState(false);
@@ -60,10 +66,14 @@ export default function LocationHub({ params }: { params: Promise<{ id: string }
       }
 
       const settingsSnap = await getDoc(doc(db, 'workspaces', workspaceId, 'settings', 'main'));
-      if (settingsSnap.exists() && settingsSnap.data().categories) {
-        const cats = settingsSnap.data().categories;
-        setCategories(cats);
-        if (cats.length > 0) setSelectedCategoryId(cats[0].id); 
+      if (settingsSnap.exists()) {
+        const settingsData = settingsSnap.data();
+        setOwnerName(settingsData.ownerName || '');
+        setBrotherPrinter(settingsData.brotherPrinter || null);
+        if (settingsData.categories) {
+          setCategories(settingsData.categories);
+          if (settingsData.categories.length > 0) setSelectedCategoryId(settingsData.categories[0].id);
+        }
       }
 
       const itemsQ = query(collection(db, 'workspaces', workspaceId, 'items'), where('locationId', '==', id));
@@ -155,6 +165,40 @@ export default function LocationHub({ params }: { params: Promise<{ id: string }
     }
   };
 
+  // 🖨️ Lagerort-Etikett direkt aus dem Hub drucken (nativ, sonst Browser-Druck)
+  const handlePrintLocationLabel = async () => {
+    const handled = await tryPrintLocationsNative(
+      [{ id: location.id, name: location.name, code: location.code }],
+      ownerName,
+      brotherPrinter,
+      window.location.origin
+    );
+    if (handled) return;
+    setPrintFallback(true);
+    setTimeout(() => { window.print(); setTimeout(() => setPrintFallback(false), 500); }, 200);
+  };
+
+  // ➕➖ Menge direkt in der Inventar-Liste ändern (Bestandsprüfung vor Ort)
+  const changeItemQuantity = async (itemId: string, delta: number, e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!workspaceId) return;
+    const item = itemsInLocation.find(i => i.id === itemId);
+    if (!item) return;
+    const newQty = Math.max(0, (Number(item.quantity) || 0) + delta);
+
+    const update: any = { quantity: newQty };
+    if (item.minQuantity != null && newQty <= Number(item.minQuantity) && !item.onShoppingList) {
+      update.onShoppingList = true;
+    }
+    setItemsInLocation(prev => prev.map(i => i.id === itemId ? { ...i, ...update } : i));
+    try {
+      await updateDoc(doc(db, 'workspaces', workspaceId, 'items', itemId), update);
+    } catch {
+      alert('Fehler beim Speichern der Menge.');
+    }
+  };
+
   // 📸 FOTO-TAGGING LOGIK (Tippen zum Erfassen neuer Items)
   const allTags: string[] = Array.from(new Set(categories.flatMap((c: any) => c.tags || [])));
 
@@ -222,16 +266,21 @@ export default function LocationHub({ params }: { params: Promise<{ id: string }
 
   return (
     <>
-      <div className="min-h-screen bg-slate-50 p-4 md:p-8 pb-32">
+      <div className="min-h-screen bg-slate-50 p-4 md:p-8 pb-32 print:hidden">
         <div className="max-w-4xl mx-auto">
           
           <div className="flex justify-between items-center mb-6">
             <Link href="/locations" className="text-orange-600 hover:underline text-sm font-medium flex items-center gap-1">
               &larr; Zurück zur Übersicht
             </Link>
-            <Link href={`/locations/${id}/edit`} className="bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 px-3 py-1.5 rounded-lg text-sm font-bold shadow-sm transition">
-              ✏️ Ort bearbeiten
-            </Link>
+            <div className="flex gap-2">
+              <button onClick={handlePrintLocationLabel} className="bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 px-3 py-1.5 rounded-lg text-sm font-bold shadow-sm transition" title="QR-Etikett für diesen Ort drucken">
+                🖨️ Etikett
+              </button>
+              <Link href={`/locations/${id}/edit`} className="bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 px-3 py-1.5 rounded-lg text-sm font-bold shadow-sm transition">
+                ✏️ Ort bearbeiten
+              </Link>
+            </div>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -373,9 +422,21 @@ export default function LocationHub({ params }: { params: Promise<{ id: string }
                               {item.category && <p className="text-[10px] text-slate-500 uppercase tracking-wider mt-0.5">{item.category}</p>}
                             </div>
                           </div>
-                          <span className="bg-slate-100 text-slate-600 text-xs font-bold px-3 py-1 rounded-lg border border-slate-200">
-                            {item.quantity}x
-                          </span>
+                          <div className="flex items-center gap-1">
+                            <button
+                              onClick={(e) => changeItemQuantity(item.id, -1, e)}
+                              className="w-7 h-7 flex items-center justify-center bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded-md text-slate-600 font-bold transition"
+                              title="Menge verringern"
+                            >−</button>
+                            <span className="bg-slate-100 text-slate-600 text-xs font-bold px-2.5 py-1 rounded-lg border border-slate-200 min-w-[38px] text-center">
+                              {item.quantity}x
+                            </span>
+                            <button
+                              onClick={(e) => changeItemQuantity(item.id, 1, e)}
+                              className="w-7 h-7 flex items-center justify-center bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded-md text-slate-600 font-bold transition"
+                              title="Menge erhöhen"
+                            >+</button>
+                          </div>
                         </Link>
                       </li>
                     ))}
@@ -487,6 +548,17 @@ export default function LocationHub({ params }: { params: Promise<{ id: string }
             </div>
           </div>
           
+        </div>
+      )}
+
+      {/* 🖨️ Browser-Fallback für das Lagerort-Etikett */}
+      {printFallback && (
+        <div className="hidden print:flex fixed inset-0 bg-white items-center justify-center">
+          <div className="text-center flex flex-col items-center justify-center" style={{ width: '62mm', height: '29mm' }}>
+            <QRCode value={buildLocationLabelUrl(window.location.origin, location.id)} size={64} level="M" />
+            <p className="mt-1 text-sm font-bold uppercase tracking-widest text-black leading-none whitespace-nowrap overflow-hidden text-ellipsis w-full px-1">{location.name}</p>
+            {location.code && <p className="text-[10px] font-mono text-black mt-0.5 leading-none">{location.code}</p>}
+          </div>
         </div>
       )}
 

@@ -117,8 +117,13 @@ export default function ItemDetail({ params }: { params: Promise<{ id: string }>
 
     setIsUpdating(true);
     try {
-      await updateDoc(doc(db, 'workspaces', workspaceId, 'items', item.id), { quantity: newQty });
-      setItem({ ...item, quantity: newQty });
+      const update: any = { quantity: newQty };
+      // Mindestbestand unterschritten -> automatisch auf die Einkaufsliste
+      const hitsMinimum = item.minQuantity != null && newQty <= Number(item.minQuantity) && !item.onShoppingList;
+      if (hitsMinimum) update.onShoppingList = true;
+
+      await updateDoc(doc(db, 'workspaces', workspaceId, 'items', item.id), update);
+      setItem({ ...item, ...update });
     } catch (error) {
       alert("Fehler beim Speichern.");
     } finally {
@@ -319,6 +324,11 @@ export default function ItemDetail({ params }: { params: Promise<{ id: string }>
                   <span className="text-3xl font-black text-slate-800">{availableQty}</span>
                   <span className="text-sm font-medium text-slate-500">von {totalQty} im Regal</span>
                 </div>
+                {item.minQuantity != null && (
+                  <p className={`text-[11px] font-bold mt-1 ${totalQty <= Number(item.minQuantity) ? 'text-red-600' : 'text-slate-400'}`}>
+                    {totalQty <= Number(item.minQuantity) ? '⚠️ Unter Mindestbestand' : 'Mindestbestand'}: {item.minQuantity}
+                  </p>
+                )}
               </div>
               
               <div className="flex items-center gap-4 bg-white p-1.5 rounded-lg border border-slate-200 shadow-sm">

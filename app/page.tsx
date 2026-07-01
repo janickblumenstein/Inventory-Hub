@@ -4,7 +4,8 @@ import { useEffect, useState, useMemo } from 'react';
 import { db } from '../lib/firebase';
 import { collection, getDocs, orderBy, query, writeBatch, doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
 import Link from 'next/link';
-import { useWorkspace } from '../context/WorkspaceContext'; 
+import QRCode from 'react-qr-code';
+import { useWorkspace } from '../context/WorkspaceContext';
 
 export default function Dashboard() {
   // 1. WORKSPACE LOGIK
@@ -16,6 +17,8 @@ export default function Dashboard() {
   const [locations, setLocations] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [categories, setCategories] = useState<any[]>([]);
+  const [ownerName, setOwnerName] = useState('');
+  const [printItems, setPrintItems] = useState<any[]>([]);
   
   // 🔥 NEU: Tab Navigation
   const [activeTab, setActiveTab] = useState<'inventory' | 'inbox' | 'shopping'>('inventory');
@@ -46,8 +49,10 @@ export default function Dashboard() {
       setLocations(locList);
       
       const settingsSnap = await getDoc(doc(workspaceRef, 'settings', 'main'));
-      if (settingsSnap.exists() && settingsSnap.data().categories) {
-        setCategories(settingsSnap.data().categories);
+      if (settingsSnap.exists()) {
+        const settingsData = settingsSnap.data();
+        if (settingsData.categories) setCategories(settingsData.categories);
+        setOwnerName(settingsData.ownerName || '');
       }
 
       const itemsQuery = query(collection(workspaceRef, 'items'), orderBy('createdAt', 'desc'));
@@ -236,6 +241,14 @@ export default function Dashboard() {
     }
   };
 
+  // 🏷️ Sammeldruck: QR-Etiketten aller markierten Items (ein Label pro Tape-Abschnitt)
+  const handlePrintLabels = () => {
+    const selected = items.filter(i => selectedItemIds.has(i.id));
+    if (selected.length === 0) return;
+    setPrintItems(selected);
+    setTimeout(() => { window.print(); }, 300);
+  };
+
   const getHierarchicalLocations = () => {
     const buildTree = (parentId: string | null, depth: number): any[] => {
       let result: any[] = [];
@@ -312,8 +325,9 @@ export default function Dashboard() {
   if (loading) return <div className="min-h-screen bg-slate-50 flex items-center justify-center text-slate-500 font-medium">Lade Werkstatt '{workspaceId}'...</div>;
 
   return (
-    <div className={`min-h-screen bg-slate-50 ${isSelectionMode ? 'pb-40' : 'pb-20'}`}>
-      
+    <>
+    <div className={`min-h-screen bg-slate-50 print:hidden ${isSelectionMode ? 'pb-40' : 'pb-20'}`}>
+
       <header className="bg-slate-900 text-white pt-6 pb-6 px-4 md:px-8 shadow-md transition-all sticky top-0 z-40">
         <div className="max-w-5xl mx-auto flex justify-between items-center">
           
@@ -610,6 +624,7 @@ export default function Dashboard() {
                 <button onClick={() => setBulkAction('category')} className="flex-1 sm:flex-none bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold py-2.5 px-3 rounded-lg border border-slate-600 transition">🏷️ Typ</button>
                 <button onClick={() => setBulkAction('addTag')} className="flex-1 sm:flex-none bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold py-2.5 px-3 rounded-lg border border-slate-600 transition">➕ Tag</button>
                 <button onClick={() => setBulkAction('removeTag')} className="flex-1 sm:flex-none bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold py-2.5 px-3 rounded-lg border border-slate-600 transition">➖ Tag</button>
+                <button onClick={handlePrintLabels} className="flex-1 sm:flex-none bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold py-2.5 px-3 rounded-lg border border-slate-600 transition">🏷️ Etiketten</button>
                 <button onClick={() => setBulkAction('delete')} className="bg-red-900/50 hover:bg-red-800 text-red-400 hover:text-white text-xs font-bold py-2.5 px-3 rounded-lg border border-red-900/50 transition">🗑️</button>
               </div>
             )}
@@ -683,5 +698,19 @@ export default function Dashboard() {
       )}
 
     </div>
+
+    {/* 🏷️ Sammeldruck: ein QR-Etikett pro markiertem Item */}
+    <div className="hidden print:block">
+      {printItems.map(it => (
+        <div key={it.id} className="flex items-center gap-2 p-1" style={{ breakAfter: 'page', maxWidth: '70mm' }}>
+          <QRCode value={`${typeof window !== 'undefined' ? window.location.origin : ''}/item/${it.id}`} size={64} level="M" />
+          <div className="text-left min-w-0">
+            <p className="text-sm font-black uppercase tracking-tight text-black leading-tight break-words">{it.name || 'Item'}</p>
+            {ownerName && <p className="text-[9px] font-bold text-black mt-0.5">{ownerName}</p>}
+          </div>
+        </div>
+      ))}
+    </div>
+    </>
   );
 }

@@ -32,6 +32,7 @@ export default function ItemDetail({ params }: { params: Promise<{ id: string }>
   const [expectedReturn, setExpectedReturn] = useState('');
 
   const [printLoan, setPrintLoan] = useState<any>(null);
+  const [printLabel, setPrintLabel] = useState(false);
   const [ownerName, setOwnerName] = useState('');
   const [lendableCategories, setLendableCategories] = useState<Record<string, boolean>>({});
   
@@ -180,6 +181,12 @@ export default function ItemDetail({ params }: { params: Promise<{ id: string }>
     setTimeout(() => { window.print(); }, 200);
   };
 
+  // 🏷️ Item-QR-Etikett drucken (scannt zurück auf diese Item-Seite)
+  const handlePrintLabel = () => {
+    setPrintLabel(true);
+    setTimeout(() => { window.print(); }, 200);
+  };
+
   const checkWarranty = (dateString: string) => {
     if (!dateString) return null;
     const purchaseDate = new Date(dateString);
@@ -230,12 +237,19 @@ export default function ItemDetail({ params }: { params: Promise<{ id: string }>
                 <div className="w-full flex flex-col sm:flex-row justify-between items-start gap-4 mb-2">
                   <h1 className="text-3xl font-bold text-slate-900 leading-tight">{item.name}</h1>
                   <div className="flex items-center gap-2 shrink-0">
-                    <button 
+                    <button
                       onClick={handleShareToShoppingList}
                       className="bg-orange-100 hover:bg-orange-200 text-orange-700 px-3 py-2 rounded-lg transition text-sm font-bold flex items-center gap-2"
                       title="Auf Einkaufsliste setzen"
                     >
                       🛒 <span className="hidden sm:inline">Einkauf</span>
+                    </button>
+                    <button
+                      onClick={handlePrintLabel}
+                      className="bg-slate-100 hover:bg-slate-200 text-slate-600 px-3 py-2 rounded-lg transition text-sm font-medium"
+                      title="QR-Etikett drucken"
+                    >
+                      🖨️ <span className="hidden sm:inline">Etikett</span>
                     </button>
                     <Link href={`/item/${item.id}/edit`} className="bg-slate-100 hover:bg-slate-200 text-slate-600 px-3 py-2 rounded-lg transition text-sm font-medium">
                       ✏️ Bearbeiten
@@ -473,6 +487,20 @@ export default function ItemDetail({ params }: { params: Promise<{ id: string }>
           </div>
         )}
       </div>
+
+      {/* 🏷️ Item-QR-Etikett (Endlos-Tape: QR links, Text rechts) */}
+      {printLabel && (
+        <div className="hidden print:flex fixed inset-0 bg-white items-center justify-center">
+          <div className="flex items-center gap-2 p-1" style={{ maxWidth: '70mm' }}>
+            <QRCode value={window.location.href} size={64} level="M" />
+            <div className="text-left min-w-0">
+              <p className="text-sm font-black uppercase tracking-tight text-black leading-tight break-words">{item.name}</p>
+              {location?.code && <p className="text-[9px] font-mono text-black mt-0.5">📍 {location.code}</p>}
+              {ownerName && <p className="text-[9px] font-bold text-black mt-0.5">{ownerName}</p>}
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }

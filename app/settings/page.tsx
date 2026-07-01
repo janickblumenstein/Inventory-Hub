@@ -5,7 +5,7 @@ import { db } from '../../lib/firebase';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import Link from 'next/link';
 import { useWorkspace } from '../../context/WorkspaceContext';
-import { isNativePrintAvailable, searchPrinters, getNativeStatus, type BrotherPrinterConfig } from '../../lib/brotherPrint';
+import { isNativePrintAvailable, searchPrinters, getNativeStatus, requestBluetoothPermissions, type BrotherPrinterConfig } from '../../lib/brotherPrint';
 
 export type CategoryConfig = {
   id: string;
@@ -149,6 +149,14 @@ export default function SettingsPage() {
     if (!isNativePrintAvailable()) return;
     setIsSearchingPrinter(true);
     try {
+      // Erst die Bluetooth-Laufzeitrechte anfordern – ohne sie bleibt die Suche leer.
+      const perm = await requestBluetoothPermissions();
+      if (perm === 'unavailable') {
+        alert('ℹ️ Für die automatische Berechtigungs-Abfrage fehlt das Plugin `cordova-plugin-android-permissions`. Bitte installieren (siehe CAPACITOR.md, Schritt 2b) – dann erscheint der Android-Dialog.');
+      } else if (perm === 'denied') {
+        alert('⚠️ Bluetooth-Berechtigung wurde nicht erteilt. Ohne sie findet die Suche keinen Drucker. Bitte beim Nachfragen auf „Zulassen" tippen.');
+      }
+
       const found = await searchPrinters(brotherPrinter.port);
       if (found.length === 0) {
         alert('Kein Drucker gefunden. Ist der Cube eingeschaltet und in den Bluetooth-Einstellungen gekoppelt?');

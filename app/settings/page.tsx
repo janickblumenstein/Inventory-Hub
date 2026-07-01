@@ -5,7 +5,7 @@ import { db } from '../../lib/firebase';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import Link from 'next/link';
 import { useWorkspace } from '../../context/WorkspaceContext';
-import { isNativePrintAvailable, searchPrinters, type BrotherPrinterConfig } from '../../lib/brotherPrint';
+import { isNativePrintAvailable, searchPrinters, getNativeStatus, type BrotherPrinterConfig } from '../../lib/brotherPrint';
 
 export type CategoryConfig = {
   id: string;
@@ -65,6 +65,10 @@ export default function SettingsPage() {
     channelInfo: '',
   });
   const [isSearchingPrinter, setIsSearchingPrinter] = useState(false);
+  const [printerStatus, setPrinterStatus] = useState<{ native: boolean; pluginFound: boolean } | null>(null);
+
+  // Diagnose: erst nach dem Mounten prüfen (window/Capacitor vorhanden).
+  useEffect(() => { setPrinterStatus(getNativeStatus()); }, []);
 
   // Formular-States
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -132,10 +136,17 @@ export default function SettingsPage() {
   };
 
   const handleSearchPrinter = async () => {
-    if (!isNativePrintAvailable()) {
-      alert('🔎 Die Druckersuche funktioniert nur in der Android-App. Im Browser bitte die MAC-Adresse manuell eintragen.');
+    const status = getNativeStatus();
+    setPrinterStatus(status);
+    if (!status.native) {
+      alert('🔎 Die Druckersuche funktioniert nur in der Android-App. Im PC-Browser bitte die MAC-Adresse manuell eintragen.');
       return;
     }
+    if (!status.pluginFound) {
+      alert('⚠️ Das Brother-Plugin wurde nicht gefunden. Wurde nach dem Einbinden `npx cap sync` ausgeführt und die App neu gebaut? (Details unter „Status" in dieser Sektion.)');
+      return;
+    }
+    if (!isNativePrintAvailable()) return;
     setIsSearchingPrinter(true);
     try {
       const found = await searchPrinters(brotherPrinter.port);
@@ -263,6 +274,20 @@ export default function SettingsPage() {
             <h2 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-1">🖨️ Etikettendrucker (Brother)</h2>
             <p className="text-xs text-slate-500">Für den Direktdruck per Bluetooth in der Android-App. Im PC-/iPhone-Browser wird stattdessen der normale Druckdialog genutzt.</p>
           </div>
+
+          {/* Diagnose-Status */}
+          {printerStatus && (
+            <div className="mb-4 flex flex-wrap gap-2 text-[11px] font-bold">
+              <span className={`px-2 py-1 rounded border ${printerStatus.native ? 'bg-green-50 text-green-700 border-green-200' : 'bg-slate-100 text-slate-500 border-slate-200'}`}>
+                {printerStatus.native ? '✅ Läuft in der App' : '🌐 Läuft im Browser'}
+              </span>
+              {printerStatus.native && (
+                <span className={`px-2 py-1 rounded border ${printerStatus.pluginFound ? 'bg-green-50 text-green-700 border-green-200' : 'bg-red-50 text-red-700 border-red-200'}`}>
+                  {printerStatus.pluginFound ? '✅ Brother-Plugin gefunden' : '❌ Brother-Plugin NICHT gefunden'}
+                </span>
+              )}
+            </div>
+          )}
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>

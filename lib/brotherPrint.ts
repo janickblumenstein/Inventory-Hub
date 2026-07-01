@@ -51,6 +51,13 @@ export function isNativePrintAvailable(): boolean {
   }
 }
 
+// Diagnose: läuft die App nativ, und ist das Cordova-Plugin eingespritzt?
+export function getNativeStatus(): { native: boolean; pluginFound: boolean } {
+  let native = false;
+  try { native = Capacitor.isNativePlatform(); } catch { /* ignore */ }
+  return { native, pluginFound: !!getPlugin() };
+}
+
 // Ist ein Drucker konfiguriert und nativer Druck möglich?
 export function canPrintNative(cfg?: BrotherPrinterConfig | null): cfg is BrotherPrinterConfig {
   return isNativePrintAvailable() && !!cfg && !!cfg.channelInfo && !!cfg.model;
@@ -113,17 +120,27 @@ export async function tryPrintNative(
   return true;
 }
 
-// Sucht erreichbare Drucker (nur nativ).
+// Sucht erreichbare Drucker (nur nativ). Mit Timeout, damit die Suche nie
+// still hängt, falls das Plugin keine Callback aufruft.
 export async function searchPrinters(
-  port: BrotherPrinterConfig['port'] = 'BLUETOOTH'
+  port: BrotherPrinterConfig['port'] = 'BLUETOOTH',
+  timeoutMs = 12000
 ): Promise<FoundPrinter[]> {
   const plugin = getPlugin();
   if (!isNativePrintAvailable() || !plugin) return [];
 
   return new Promise((resolve) => {
-    const onOk = (printers: FoundPrinter[]) => resolve(printers || []);
-    const onErr = () => resolve([]);
-    if (port === 'NET') plugin.findNetworkPrinters(onOk, onErr);
-    else plugin.findBluetoothPrinters(onOk, onErr);
+    let done = false;
+    const finish = (r: FoundPrinter[]) => { if (!done) { done = true; resolve(r); } };
+    const timer = setTimeout(() => finish([]), timeoutMs);
+    const onOk = (printers: FoundPrinter[]) => { clearTimeout(timer); finish(printers || []); };
+    const onErr = () => { clearTimeout(timer); finish([]); };
+    try {
+      if (port === 'NET') plugin.findNetworkPrinters(onOk, onErr);
+      else plugin.findBluetoothPrinters(onOk, onErr);
+    } catch {
+      clearTimeout(timer);
+      finish([]);
+    }
   });
 }

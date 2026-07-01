@@ -1,28 +1,48 @@
 # ShedSync als Android-App (Capacitor + Brother-Direktdruck)
 
 Ziel: Die Web-App als Android-App verpacken, damit Etiketten **per Knopfdruck
-über Bluetooth** an den Brother-Drucker (z. B. PT-P710BT) gedruckt werden.
+über Bluetooth** an den Brother **PT-P710BT** gedruckt werden.
 
 Die App läuft im **Server-Modus**: Die native Hülle lädt die gehostete Web-App
 (`https://shedsync.vercel.app`) und stellt zusätzlich das Brother-Plugin bereit.
 → Ein Codebestand, Web-Updates erscheinen sofort in der App. Ein neuer APK-Build
-ist nur nötig, wenn sich **native** Teile (Plugins/Permissions/Config) ändern.
+ist nur nötig, wenn sich **native** Teile (Plugin/Permissions/Config) ändern.
 
 Auf PC- und iPhone-**Browsern** ändert sich nichts: dort greift automatisch der
-`window.print()`-Fallback (Druck über den installierten Druckertreiber bzw. per
-„Als PDF sichern → Teilen → Brother-App").
+`window.print()`-Fallback.
 
 ---
 
-## 0. Voraussetzungen (einmalig auf Deinem Rechner)
+## Wo läuft was? (wichtig zum Verständnis)
+
+- Alle `npm`- und `npx cap`-Befehle tippst Du in ein **Terminal** im
+  Projektordner (z. B. das Terminal-Tab in VS Code) — **nicht** in Android Studio.
+- Wo landet was?
+  - `npm install …` → lädt Pakete nach **`node_modules/`** und trägt sie in
+    **`package.json`** ein.
+  - `npx cap add android` → erzeugt den Ordner **`android/`** (ein komplettes
+    Android-Studio-Projekt).
+  - `npx cap sync` → kopiert den **nativen** Code der Plugins in `android/`.
+  - `npx cap open android` → öffnet den `android/`-Ordner in **Android Studio**,
+    wo Du mit ▶ **Run** aufs Handy baust.
+- Kurz: Es liegt alles sichtbar im Projektordner. Nichts installiert sich
+  „irgendwo versteckt".
+
+---
+
+## 0. Voraussetzungen (einmalig)
 
 - **Node.js** (hast Du)
 - **Android Studio** + **JDK 17**
-- Dein **Android-Handy** im Entwicklermodus (USB-Debugging an)
-- Der **Brother-Drucker via Bluetooth in den Android-Einstellungen gekoppelt**
+- **Android-Handy** im Entwicklermodus (USB-Debugging an) — nur fürs Testen.
+- Der **PT-P710BT via Bluetooth in den Android-Einstellungen gekoppelt**.
 
-Bereits im Projekt hinterlegt (kein erneutes Installieren nötig):
-`@capacitor/core`, `@capacitor/cli`, `@capacitor/android`, `capacitor.config.ts`.
+Bereits im Projekt: `@capacitor/core`, `@capacitor/cli`, `@capacitor/android`,
+`capacitor.config.ts` (zeigt auf `https://shedsync.vercel.app`).
+
+> Falls Du vorher `@rdlabo/capacitor-brotherprint` installiert hattest: wieder
+> entfernen (`npm uninstall @rdlabo/capacitor-brotherprint`). Es unterstützt den
+> PT-P710BT **nicht**.
 
 ---
 
@@ -33,28 +53,16 @@ npm install
 npx cap add android
 ```
 
-## 2. Brother-Plugin einbinden
-
-Wir nutzen ein fertiges Capacitor-Plugin, das das native Brother Print SDK
-kapselt. Empfohlen:
+## 2. Brother-Plugin einbinden (unterstützt den PT-P710BT)
 
 ```bash
-npm install @rdlabo/capacitor-brotherprint
+npm install github:AbobosSoftware/cordova-plugin-brother-label-printer
 npx cap sync
 ```
 
-> **Wichtig – einmal verifizieren:** Der Code spricht das native Plugin unter dem
-> Namen `BrotherPrint` an (siehe `lib/brotherPrint.ts`). Prüfe nach der
-> Installation:
-> 1. Registriert sich das Plugin unter genau diesem Namen? Falls nicht, den
->    Namen in `registerPlugin('BrotherPrint')` anpassen.
-> 2. Kennt das Plugin **`PT_P710BT`** und einen **24-mm-Tape**-Wert? Die genauen
->    Enum-Strings trägst Du in der App unter **Einstellungen → Etikettendrucker**
->    in die Felder *Modell* und *Tape* ein — dafür ist kein Code-Rebuild nötig.
->    Falls das Plugin den P710BT nicht führt, alternativ das Plugin
->    `AbobosSoftware/cordova-plugin-brother-label-printer` verwenden (bringt das
->    Brother-Android-SDK v4.13 mit) und den Adapter in `lib/brotherPrint.ts`
->    entsprechend anpassen.
+Capacitor erkennt das Cordova-Plugin automatisch. Es bündelt das Brother Print
+SDK für Android und stellt im WebView `cordova.plugins.brotherPrinter` bereit —
+genau das, was `lib/brotherPrint.ts` anspricht. **Kein Code-Anpassen nötig.**
 
 ## 3. Bluetooth-Berechtigungen (Android 12+)
 
@@ -63,14 +71,12 @@ In `android/app/src/main/AndroidManifest.xml` innerhalb von `<manifest>`:
 ```xml
 <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
 <uses-permission android:name="android.permission.BLUETOOTH_SCAN" />
-<!-- für ältere Androids zusätzlich: -->
 <uses-permission android:name="android.permission.BLUETOOTH" />
 <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" />
 <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
 ```
 
-Diese Rechte müssen zur Laufzeit einmal vom Nutzer bestätigt werden (das
-Plugin/Android fragt beim ersten Suchen/Drucken danach).
+Diese Rechte werden zur Laufzeit einmal abgefragt.
 
 ## 4. Bauen & auf dem Handy starten
 
@@ -78,37 +84,40 @@ Plugin/Android fragt beim ersten Suchen/Drucken danach).
 npx cap open android
 ```
 
-In Android Studio: Handy wählen → **Run**. Beim ersten Mal dauert der
-Gradle-Sync etwas.
+In Android Studio: Handy wählen → ▶ **Run**. Der erste Gradle-Sync dauert etwas.
 
 ## 5. Drucker in der App koppeln
 
-1. In der App **Einstellungen → Etikettendrucker (Brother)** öffnen.
-2. **„Drucker suchen"** tippen → den P710BT auswählen (füllt MAC + Modell).
-3. Feld **Tape / Label-Größe** auf den 24-mm-Wert des Plugins setzen.
-4. **Speichern.**
+In der App **Einstellungen → Etikettendrucker (Brother)**. Die Felder sind schon
+korrekt vorbelegt:
 
-Danach drucken die Buttons **🖨️ Etikett** (Item-Detail) und **🏷️ Etiketten**
-(Sammeldruck im Auswahlmodus) direkt per Bluetooth.
+| Feld | Wert |
+|------|------|
+| Modell | `PT_P710BT` |
+| Tape / Label-Größe | `W24` (= 24 mm) |
+| Verbindung | Bluetooth |
+| MAC-Adresse | per **„Drucker suchen"** füllen (oder manuell eintragen) |
+
+Dann **Speichern**. Danach drucken **🖨️ Etikett** (Item-Detail) und
+**🏷️ Etiketten** (Sammeldruck im Auswahlmodus) direkt per Bluetooth.
 
 ---
 
-## Wie es zusammenspielt (Kurzüberblick)
+## Wie es zusammenspielt
 
 - `lib/labelImage.ts` – rendert das Etikett (QR + Text) als PNG (Base64).
 - `lib/brotherPrint.ts` – **einzige** Stelle mit Brother-/Plugin-Spezifika:
-  Erkennung nativer Umgebung, `printImage`, Druckersuche.
+  `cordova.plugins.brotherPrinter` → `setPrinter` + `printViaSDK`.
 - Item-Detail & Dashboard rufen `tryPrintNative(...)`; klappt das nicht
   (Browser/kein Drucker), wird `window.print()` genutzt.
 
 ## Updates
 
-- **Web-Änderungen** (UI, Logik): einfach nach Vercel deployen – erscheinen ohne
-  neuen APK-Build in der App.
-- **Neuer APK-Build** nur nötig bei Änderungen an Plugins, Permissions oder
-  `capacitor.config.ts` (dann `npx cap sync` + in Android Studio neu bauen).
+- **Web-Änderungen**: nach Vercel deployen – erscheinen ohne neuen APK-Build.
+- **Neuer APK-Build** nur bei Änderungen an Plugin/Permissions/`capacitor.config.ts`
+  (dann `npx cap sync` + in Android Studio neu bauen).
 
 ## iPhone (optional, später)
 
-Dasselbe Plugin läuft auf iOS. Der Build braucht aber einen **Mac mit Xcode**
-(`npx cap add ios`). Bis dahin nutzen iPhones den Browser-Fallback.
+Braucht einen **Mac mit Xcode** zum Bauen. Bis dahin nutzen iPhones den
+Browser-Fallback.

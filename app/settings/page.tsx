@@ -60,8 +60,8 @@ export default function SettingsPage() {
   // 🖨️ Brother-Etikettendrucker (nur in der Android-App relevant)
   const [brotherPrinter, setBrotherPrinter] = useState<BrotherPrinterConfig>({
     model: 'PT_P710BT',
-    labelName: '',
-    port: 'bluetooth',
+    labelName: 'W24',
+    port: 'BLUETOOTH',
     channelInfo: '',
   });
   const [isSearchingPrinter, setIsSearchingPrinter] = useState(false);
@@ -145,10 +145,10 @@ export default function SettingsPage() {
         const p = found[0];
         setBrotherPrinter(prev => ({
           ...prev,
-          channelInfo: p.channelInfo || prev.channelInfo,
-          model: p.modelName || prev.model,
+          channelInfo: p.macAddress || p.ipAddress || p.channelInfo || prev.channelInfo,
+          model: p.model || prev.model,
         }));
-        alert(`✅ Gefunden: ${p.modelName || 'Drucker'} (${p.channelInfo || '?'})`);
+        alert(`✅ Gefunden: ${p.modelName || p.model || 'Drucker'} (${p.macAddress || p.ipAddress || '?'})`);
       }
     } finally {
       setIsSearchingPrinter(false);
@@ -281,7 +281,7 @@ export default function SettingsPage() {
                 type="text"
                 value={brotherPrinter.labelName}
                 onChange={(e) => setBrotherPrinter({ ...brotherPrinter, labelName: e.target.value })}
-                placeholder="z.B. 24mm-Wert des Plugins"
+                placeholder="z.B. W24 (= 24mm)"
                 className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none font-mono text-sm text-slate-800 focus:border-orange-500"
               />
             </div>
@@ -292,10 +292,8 @@ export default function SettingsPage() {
                 onChange={(e) => setBrotherPrinter({ ...brotherPrinter, port: e.target.value as BrotherPrinterConfig['port'] })}
                 className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none text-sm font-medium text-slate-800 focus:border-orange-500"
               >
-                <option value="bluetooth">Bluetooth</option>
-                <option value="bluetoothLowEnergy">Bluetooth LE</option>
-                <option value="wifi">WLAN</option>
-                <option value="usb">USB</option>
+                <option value="BLUETOOTH">Bluetooth</option>
+                <option value="NET">WLAN</option>
               </select>
             </div>
             <div>

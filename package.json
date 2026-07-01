@@ -12,6 +12,7 @@
     "@capacitor/android": "^8.4.1",
     "@capacitor/core": "^8.4.1",
     "cheerio": "^1.2.0",
+    "cordova-plugin-brother-label-printer": "github:AbobosSoftware/cordova-plugin-brother-label-printer",
     "firebase": "^12.11.0",
     "html5-qrcode": "^2.3.8",
     "next": "16.2.1",

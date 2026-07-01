@@ -460,9 +460,17 @@ export default function ItemDetail({ params }: { params: Promise<{ id: string }>
 
             <div className="border-t border-slate-100 pt-6 mt-8">
               <h3 className="text-sm font-bold text-slate-500 uppercase tracking-wider mb-2">Lagerort</h3>
-              <p className="text-lg font-medium text-slate-800 mb-4">
-                📍 {location ? location.name : 'Nicht zugewiesen'}
-              </p>
+              {location ? (
+                <Link
+                  href={`/locations/${location.id}`}
+                  className="inline-flex items-center gap-2 text-lg font-medium text-slate-800 mb-4 hover:text-orange-700 transition group"
+                >
+                  📍 <span className="underline decoration-dotted underline-offset-4">{location.name}</span>
+                  <span className="text-sm text-orange-600 opacity-70 group-hover:opacity-100 transition">→ öffnen</span>
+                </Link>
+              ) : (
+                <p className="text-lg font-medium text-slate-800 mb-4">📍 Nicht zugewiesen</p>
+              )}
               
               {location && location.imageUrl && (
                 <div className="relative inline-block border-2 border-slate-200 rounded-lg overflow-hidden shadow-sm w-full">

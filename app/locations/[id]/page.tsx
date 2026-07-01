@@ -15,6 +15,7 @@ export default function LocationHub({ params }: { params: Promise<{ id: string }
   const id = resolvedParams.id;
 
   const [location, setLocation] = useState<any>(null);
+  const [parentLocation, setParentLocation] = useState<any>(null);
   const [itemsInLocation, setItemsInLocation] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -43,7 +44,16 @@ export default function LocationHub({ params }: { params: Promise<{ id: string }
       const locRef = doc(db, 'workspaces', workspaceId, 'locations', id);
       const locSnap = await getDoc(locRef);
       if (locSnap.exists()) {
-        setLocation({ id: locSnap.id, ...locSnap.data() });
+        const locData = locSnap.data();
+        setLocation({ id: locSnap.id, ...locData });
+
+        // Eltern-Ort für die Aufwärts-Navigation laden
+        if (locData.parentId) {
+          const parentSnap = await getDoc(doc(db, 'workspaces', workspaceId, 'locations', locData.parentId));
+          setParentLocation(parentSnap.exists() ? { id: parentSnap.id, ...parentSnap.data() } : null);
+        } else {
+          setParentLocation(null);
+        }
       } else {
         router.push('/locations');
         return;
@@ -229,6 +239,11 @@ export default function LocationHub({ params }: { params: Promise<{ id: string }
             {/* LINKE SPALTE: Ort & Foto */}
             <div className="md:col-span-1 space-y-4">
               <div className="bg-white p-5 rounded-2xl shadow-sm border border-slate-200">
+                {parentLocation && (
+                  <Link href={`/locations/${parentLocation.id}`} className="inline-block text-[11px] font-bold text-slate-400 hover:text-orange-600 transition mb-1">
+                    ↑ {parentLocation.name}
+                  </Link>
+                )}
                 <h1 className="text-2xl font-black text-slate-900 mb-1">{location.name}</h1>
                 {location.code && <span className="inline-block bg-slate-100 text-slate-500 text-xs font-mono px-2 py-1 rounded border border-slate-200 mb-4">{location.code}</span>}
                 

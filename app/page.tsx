@@ -4,11 +4,13 @@ import { useEffect, useState, useMemo } from 'react';
 import { db } from '../lib/firebase';
 import { collection, getDocs, orderBy, query, writeBatch, doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import QRCode from 'react-qr-code';
 import { useWorkspace } from '../context/WorkspaceContext';
 import { tryPrintNative } from '../lib/brotherPrint';
 
 export default function Dashboard() {
+  const router = useRouter();
   // 1. WORKSPACE LOGIK
   const { workspaceId, setWorkspaceId, isLoading: isWorkspaceLoading } = useWorkspace();
   const [loginInput, setLoginInput] = useState('');
@@ -584,20 +586,30 @@ export default function Dashboard() {
                               {item.ean && <p className="text-[10px] text-slate-500 font-mono mt-0.5">EAN: {item.ean}</p>}
 
                               {groupBy === 'location' && item.subPath && (
-                                <span className="inline-flex items-center gap-1 mt-1 text-[10px] font-bold text-orange-600 bg-orange-50 px-2 py-0.5 rounded border border-orange-100">
+                                <button
+                                  type="button"
+                                  onClick={(e) => { e.preventDefault(); e.stopPropagation(); router.push(`/locations/${item.locationId}`); }}
+                                  className="inline-flex items-center gap-1 mt-1 text-[10px] font-bold text-orange-600 bg-orange-50 px-2 py-0.5 rounded border border-orange-100 hover:bg-orange-100 hover:border-orange-300 transition"
+                                  title="Lagerort öffnen"
+                                >
                                   📍 {item.subPath}
                                   {locations.find(l => l.id === item.locationId)?.code && (
                                     <span className="text-[9px] font-mono text-orange-400 opacity-80">
                                       [{locations.find(l => l.id === item.locationId)?.code}]
                                     </span>
                                   )}
-                                </span>
+                                </button>
                               )}
 
                               {groupBy !== 'location' && item.locationId && (
-                                <span className="block mt-1 text-[10px] text-slate-500 truncate">
+                                <button
+                                  type="button"
+                                  onClick={(e) => { e.preventDefault(); e.stopPropagation(); router.push(`/locations/${item.locationId}`); }}
+                                  className="block mt-1 text-[10px] text-slate-500 truncate hover:text-orange-600 transition text-left"
+                                  title="Lagerort öffnen"
+                                >
                                   📍 {getRootLocationName(item.locationId, locations)} {item.subPath && `> ${item.subPath}`}
-                                </span>
+                                </button>
                               )}
                             </div>
 

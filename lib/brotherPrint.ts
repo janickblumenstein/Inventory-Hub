@@ -115,8 +115,13 @@ function printImageAsync(plugin: BrotherCordovaPlugin, base64: string): Promise<
     plugin.printViaSDK(
       base64,
       (res) => {
-        if (res && res.result === 'ERROR_NONE') resolve();
-        else reject(new Error(res?.result || 'Unbekannter Druckfehler'));
+        // Das Plugin meldet Erfolg je nach Version unterschiedlich
+        // ('ERROR_NONE', 'success', 'succeeded', teils auch ohne result-Feld).
+        // Nur bei einem klar erkennbaren Fehler ablehnen.
+        const r = String((res as any)?.result ?? res ?? '').toLowerCase();
+        const ok = r === '' || r.includes('error_none') || r.includes('success') || r.includes('succeed');
+        if (ok) resolve();
+        else reject(new Error(String((res as any)?.result ?? 'Unbekannter Druckfehler')));
       },
       (e) => reject(new Error(e))
     );

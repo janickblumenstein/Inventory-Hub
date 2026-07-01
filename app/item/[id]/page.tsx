@@ -189,7 +189,7 @@ export default function ItemDetail({ params }: { params: Promise<{ id: string }>
   // Sonst (PC/iPhone-Browser): window.print()-Fallback.
   const handlePrintLabel = async () => {
     const handled = await tryPrintNative(
-      [{ id: item.id, name: item.name }],
+      [{ id: item.id, name: item.name, locationCode: location?.code }],
       ownerName,
       brotherPrinter,
       window.location.origin

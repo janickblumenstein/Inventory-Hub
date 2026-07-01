@@ -10,7 +10,13 @@
 // (Capacitor). Im PC-/iPhone-Browser ist isNativePrintAvailable() = false und
 // die App fällt automatisch auf window.print() zurück.
 import { Capacitor } from '@capacitor/core';
-import { renderLabelToPng, type LabelItem } from './labelImage';
+import {
+  renderLabelToPng,
+  renderLocationLabelToPng,
+  DEFAULT_LABEL_LENGTH_MM,
+  type LabelItem,
+  type LabelLocation,
+} from './labelImage';
 
 // Konfiguration des gekoppelten Druckers (in den Settings gespeichert).
 export type BrotherPrinterConfig = {
@@ -18,6 +24,7 @@ export type BrotherPrinterConfig = {
   labelName: string;   // Tape-Größe, z.B. 'W24' (= 24mm-Tape)
   port: 'BLUETOOTH' | 'NET';
   channelInfo: string; // Bluetooth: MAC-Adresse, NET: IP-Adresse
+  labelLengthMm?: number; // feste Etikettenlänge in mm (Default 60)
 };
 
 export type FoundPrinter = {
@@ -132,8 +139,36 @@ export async function tryPrintNative(
   try {
     await requestBluetoothPermissions(); // best-effort; ohne Recht kein BT-Zugriff
     await setPrinterAsync(plugin, cfg, copies);
+    const lengthMm = cfg.labelLengthMm || DEFAULT_LABEL_LENGTH_MM;
     for (const item of items) {
-      const encodedImage = await renderLabelToPng(item, ownerName, origin);
+      const encodedImage = await renderLabelToPng(item, ownerName, origin, lengthMm);
+      await printImageAsync(plugin, encodedImage);
+    }
+  } catch (e) {
+    console.error('Brother-Druck fehlgeschlagen:', e);
+    alert('❌ Druck fehlgeschlagen: ' + (e as Error).message + '\nIst der Drucker eingeschaltet und gekoppelt?');
+  }
+  return true;
+}
+
+// Druckt Lagerort-Etiketten nativ (QR führt beim Scannen direkt zum Lagerort).
+export async function tryPrintLocationsNative(
+  locs: LabelLocation[],
+  ownerName: string,
+  cfg: BrotherPrinterConfig | null | undefined,
+  origin: string,
+  copies = 1
+): Promise<boolean> {
+  if (!canPrintNative(cfg)) return false;
+  const plugin = getPlugin();
+  if (!plugin) return false;
+
+  try {
+    await requestBluetoothPermissions();
+    await setPrinterAsync(plugin, cfg, copies);
+    const lengthMm = cfg.labelLengthMm || DEFAULT_LABEL_LENGTH_MM;
+    for (const loc of locs) {
+      const encodedImage = await renderLocationLabelToPng(loc, ownerName, origin, lengthMm);
       await printImageAsync(plugin, encodedImage);
     }
   } catch (e) {

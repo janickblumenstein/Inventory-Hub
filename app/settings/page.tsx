@@ -63,6 +63,7 @@ export default function SettingsPage() {
     labelName: 'W24',
     port: 'BLUETOOTH',
     channelInfo: '',
+    labelLengthMm: 60,
   });
   const [isSearchingPrinter, setIsSearchingPrinter] = useState(false);
   const [printerStatus, setPrinterStatus] = useState<{ native: boolean; pluginFound: boolean } | null>(null);
@@ -336,6 +337,17 @@ export default function SettingsPage() {
                 value={brotherPrinter.channelInfo}
                 onChange={(e) => setBrotherPrinter({ ...brotherPrinter, channelInfo: e.target.value })}
                 placeholder="z.B. AB:CD:EF:12:34:56"
+                className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none font-mono text-sm text-slate-800 focus:border-orange-500"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-500 mb-1">Etikettenlänge (mm)</label>
+              <input
+                type="number"
+                min={30}
+                max={200}
+                value={brotherPrinter.labelLengthMm || 60}
+                onChange={(e) => setBrotherPrinter({ ...brotherPrinter, labelLengthMm: Number(e.target.value) || 60 })}
                 className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none font-mono text-sm text-slate-800 focus:border-orange-500"
               />
             </div>

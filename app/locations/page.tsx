@@ -2,11 +2,13 @@
 
 import { useState, useEffect } from 'react';
 import { db, storage } from '../../lib/firebase';
-import { collection, addDoc, getDocs, doc, deleteDoc, query, orderBy, updateDoc } from 'firebase/firestore';
+import { collection, addDoc, getDocs, doc, deleteDoc, query, orderBy, getDoc } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import Link from 'next/link';
-import QRCode from 'react-qr-code'; 
+import QRCode from 'react-qr-code';
 import { useWorkspace } from '../../context/WorkspaceContext';
+import { tryPrintLocationsNative } from '../../lib/brotherPrint';
+import { buildLocationLabelUrl } from '../../lib/labelImage';
 
 export default function LocationsManager() {
   const { workspaceId } = useWorkspace();
@@ -17,6 +19,9 @@ export default function LocationsManager() {
   
   const [locCode, setLocCode] = useState('');
   const [imageFile, setImageFile] = useState<File | null>(null);
+
+  const [ownerName, setOwnerName] = useState('');
+  const [brotherPrinter, setBrotherPrinter] = useState<any>(null);
 
   const [loading, setLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
@@ -29,6 +34,12 @@ export default function LocationsManager() {
       const snap = await getDocs(q);
       const list = snap.docs.map(d => ({ id: d.id, ...d.data() }));
       setLocations(list);
+
+      const settingsSnap = await getDoc(doc(db, 'workspaces', workspaceId, 'settings', 'main'));
+      if (settingsSnap.exists()) {
+        setOwnerName(settingsSnap.data().ownerName || '');
+        setBrotherPrinter(settingsSnap.data().brotherPrinter || null);
+      }
     } catch (e) {
       console.error(e);
     } finally {
@@ -104,9 +115,17 @@ export default function LocationsManager() {
     }
   };
 
-  const handlePrint = (loc: any) => {
+  // 🖨️ Lagerort-Etikett: nativ (Android-App) per Bluetooth, sonst Browser-Druck.
+  const handlePrint = async (loc: any) => {
+    const handled = await tryPrintLocationsNative(
+      [{ id: loc.id, name: loc.name, code: loc.code }],
+      ownerName,
+      brotherPrinter,
+      window.location.origin
+    );
+    if (handled) return;
     setPrintLoc(loc);
-    setTimeout(() => { window.print(); }, 200); 
+    setTimeout(() => { window.print(); }, 200);
   };
 
   // Verhindert das Rendern, bevor wir wissen, in welcher Werkstatt wir sind
@@ -207,7 +226,7 @@ export default function LocationsManager() {
     <div className="hidden print:flex fixed inset-0 bg-white items-center justify-center">
       {printLoc && (
         <div className="text-center flex flex-col items-center justify-center" style={{ width: '62mm', height: '29mm' }}>
-          <QRCode value={printLoc.code} size={64} level="M" />
+          <QRCode value={buildLocationLabelUrl(window.location.origin, printLoc.id)} size={64} level="M" />
           <p className="mt-1 text-sm font-bold uppercase tracking-widest text-black leading-none whitespace-nowrap overflow-hidden text-ellipsis w-full px-1">{printLoc.name}</p>
           <p className="text-[10px] font-mono text-black mt-0.5 leading-none">{printLoc.code}</p>
         </div>

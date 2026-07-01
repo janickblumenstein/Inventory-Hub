@@ -134,12 +134,20 @@ export default function SuperScanner() {
               return;
             }
 
-            // 1. LAGERORT GESCANNT?
+            // 0b. LAGERORT-QR GESCANNT? (Link auf /locations/<id> aus unserem Etikett)
+            const locLinkMatch = decodedText.match(/\/locations\/([^/?#]+)/);
+            if (locLinkMatch) {
+              scannerInstance.clear();
+              router.push(`/locations/${locLinkMatch[1]}`);
+              return;
+            }
+
+            // 1. LAGERORT-CODE GESCANNT? (ältere Etiketten mit reinem Code)
             const locQuery = query(collection(db, 'workspaces', workspaceId, 'locations'), where('code', '==', decodedText));
             const locSnap = await getDocs(locQuery);
             if (!locSnap.empty) {
               scannerInstance.clear();
-              router.push(`/?scannedLoc=${locSnap.docs[0].id}`); 
+              router.push(`/locations/${locSnap.docs[0].id}`);
               return;
             }
 

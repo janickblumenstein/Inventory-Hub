@@ -6,6 +6,7 @@ import { doc, getDoc, updateDoc, collection, addDoc, query, where, getDocs } fro
 import Link from 'next/link';
 import QRCode from 'react-qr-code';
 import { useWorkspace } from '../../../context/WorkspaceContext';
+import { tryPrintNative } from '../../../lib/brotherPrint';
 
 // 🛒 DAS SHOP-LEXIKON FÜR DIE SCHNELLSUCHE
 const SUPPORTED_SHOPS: Record<string, { name: string, style: string, urlPattern: string }> = {
@@ -34,6 +35,7 @@ export default function ItemDetail({ params }: { params: Promise<{ id: string }>
   const [printLoan, setPrintLoan] = useState<any>(null);
   const [printLabel, setPrintLabel] = useState(false);
   const [ownerName, setOwnerName] = useState('');
+  const [brotherPrinter, setBrotherPrinter] = useState<any>(null);
   const [lendableCategories, setLendableCategories] = useState<Record<string, boolean>>({});
   
   // 🛒 EINSTELLUNGEN FÜR DIE SHOPS
@@ -71,6 +73,7 @@ export default function ItemDetail({ params }: { params: Promise<{ id: string }>
       if (settingsSnap.exists()) {
         const data = settingsSnap.data();
         setOwnerName(data.ownerName || 'ShedSync');
+        setBrotherPrinter(data.brotherPrinter || null);
         setPreferredShops(data.preferredShops || ['galaxus', 'hornbach', 'migros', 'coop']);
         setCustomShops(data.customShops || []);
 
@@ -182,7 +185,16 @@ export default function ItemDetail({ params }: { params: Promise<{ id: string }>
   };
 
   // 🏷️ Item-QR-Etikett drucken (scannt zurück auf diese Item-Seite)
-  const handlePrintLabel = () => {
+  // Nativ (Android-App): direkt per Bluetooth an den Brother-Drucker.
+  // Sonst (PC/iPhone-Browser): window.print()-Fallback.
+  const handlePrintLabel = async () => {
+    const handled = await tryPrintNative(
+      [{ id: item.id, name: item.name }],
+      ownerName,
+      brotherPrinter,
+      window.location.origin
+    );
+    if (handled) return;
     setPrintLabel(true);
     setTimeout(() => { window.print(); }, 200);
   };

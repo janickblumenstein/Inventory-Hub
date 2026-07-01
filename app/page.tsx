@@ -6,6 +6,7 @@ import { collection, getDocs, orderBy, query, writeBatch, doc, getDoc, setDoc, u
 import Link from 'next/link';
 import QRCode from 'react-qr-code';
 import { useWorkspace } from '../context/WorkspaceContext';
+import { tryPrintNative } from '../lib/brotherPrint';
 
 export default function Dashboard() {
   // 1. WORKSPACE LOGIK
@@ -18,6 +19,7 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [categories, setCategories] = useState<any[]>([]);
   const [ownerName, setOwnerName] = useState('');
+  const [brotherPrinter, setBrotherPrinter] = useState<any>(null);
   const [printItems, setPrintItems] = useState<any[]>([]);
   
   // 🔥 NEU: Tab Navigation
@@ -53,6 +55,7 @@ export default function Dashboard() {
         const settingsData = settingsSnap.data();
         if (settingsData.categories) setCategories(settingsData.categories);
         setOwnerName(settingsData.ownerName || '');
+        setBrotherPrinter(settingsData.brotherPrinter || null);
       }
 
       const itemsQuery = query(collection(workspaceRef, 'items'), orderBy('createdAt', 'desc'));
@@ -241,10 +244,21 @@ export default function Dashboard() {
     }
   };
 
-  // 🏷️ Sammeldruck: QR-Etiketten aller markierten Items (ein Label pro Tape-Abschnitt)
-  const handlePrintLabels = () => {
+  // 🏷️ Sammeldruck: QR-Etiketten aller markierten Items.
+  // Nativ (Android-App): direkt per Bluetooth an den Brother-Drucker.
+  // Sonst (PC/iPhone-Browser): window.print() (ein Label pro Tape-Abschnitt).
+  const handlePrintLabels = async () => {
     const selected = items.filter(i => selectedItemIds.has(i.id));
     if (selected.length === 0) return;
+
+    const handled = await tryPrintNative(
+      selected.map(i => ({ id: i.id, name: i.name })),
+      ownerName,
+      brotherPrinter,
+      window.location.origin
+    );
+    if (handled) return;
+
     setPrintItems(selected);
     setTimeout(() => { window.print(); }, 300);
   };

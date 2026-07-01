@@ -9,17 +9,23 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@capacitor/android": "^8.4.1",
+    "@capacitor/core": "^8.4.1",
     "cheerio": "^1.2.0",
+    "cordova-plugin-brother-label-printer": "github:AbobosSoftware/cordova-plugin-brother-label-printer",
     "firebase": "^12.11.0",
     "html5-qrcode": "^2.3.8",
     "next": "16.2.1",
+    "qrcode": "^1.5.4",
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "react-qr-code": "^2.0.18"
   },
   "devDependencies": {
+    "@capacitor/cli": "^8.4.1",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
+    "@types/qrcode": "^1.5.6",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",

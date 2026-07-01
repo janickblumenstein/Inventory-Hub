@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useState, use } from 'react';
-import { db } from '../../../lib/firebase';
-import { doc, getDoc, collection, query, where, getDocs, writeBatch, updateDoc } from 'firebase/firestore';
+import { db, storage } from '../../../lib/firebase';
+import { doc, getDoc, collection, query, where, getDocs, writeBatch, updateDoc, addDoc } from 'firebase/firestore';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useWorkspace } from '../../../context/WorkspaceContext';
@@ -28,6 +29,13 @@ export default function LocationHub({ params }: { params: Promise<{ id: string }
   // 📍 MARKER-STUDIO STATES
   const [showMarkerStudio, setShowMarkerStudio] = useState(false);
   const [activeMarkerItemId, setActiveMarkerItemId] = useState<string | null>(null);
+
+  // 📸 FOTO-TAGGING STATES (Tippen zum Erfassen)
+  const [showPhotoTagging, setShowPhotoTagging] = useState(false);
+  const [pendingTag, setPendingTag] = useState<{ x: number; y: number } | null>(null);
+  const [newItemName, setNewItemName] = useState('');
+  const [isCreatingItem, setIsCreatingItem] = useState(false);
+  const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
 
   const fetchLocationAndItems = async () => {
     if (!workspaceId) return;
@@ -137,6 +145,68 @@ export default function LocationHub({ params }: { params: Promise<{ id: string }
     }
   };
 
+  // 📸 FOTO-TAGGING LOGIK (Tippen zum Erfassen neuer Items)
+  const allTags: string[] = Array.from(new Set(categories.flatMap((c: any) => c.tags || [])));
+
+  const openPhotoTagging = () => {
+    setShowPhotoTagging(true);
+    setPendingTag(null);
+    setNewItemName('');
+  };
+
+  const handlePhotoTaggingTap = (e: React.MouseEvent<HTMLImageElement>) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = ((e.clientX - rect.left) / rect.width) * 100;
+    const y = ((e.clientY - rect.top) / rect.height) * 100;
+    setPendingTag({ x, y });
+    setNewItemName('');
+  };
+
+  const createTaggedItem = async () => {
+    if (!pendingTag || !workspaceId) return;
+    setIsCreatingItem(true);
+    try {
+      const name = newItemName.trim() || 'Unbenannt';
+      const docRef = await addDoc(collection(db, 'workspaces', workspaceId, 'items'), {
+        name,
+        quantity: 1,
+        locationId: id,
+        category: '', // -> landet im Eingangskorb zum späteren Einsortieren
+        tags: [],
+        tagX: pendingTag.x,
+        tagY: pendingTag.y,
+        createdAt: new Date().toISOString()
+      });
+      setItemsInLocation(prev => [...prev, {
+        id: docRef.id, name, quantity: 1, locationId: id,
+        category: '', tags: [], tagX: pendingTag.x, tagY: pendingTag.y
+      }]);
+      setPendingTag(null);
+      setNewItemName('');
+    } catch (e) {
+      alert('Fehler beim Erfassen des Items.');
+    } finally {
+      setIsCreatingItem(false);
+    }
+  };
+
+  const handleCaptureLocationPhoto = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !workspaceId) return;
+    setIsUploadingPhoto(true);
+    try {
+      const fileRef = ref(storage, `workspaces/${workspaceId}/locations/${Date.now()}_${file.name}`);
+      await uploadBytes(fileRef, file);
+      const url = await getDownloadURL(fileRef);
+      await updateDoc(doc(db, 'workspaces', workspaceId, 'locations', id), { imageUrl: url });
+      setLocation((prev: any) => ({ ...prev, imageUrl: url }));
+    } catch (err) {
+      alert('Fehler beim Hochladen des Fotos.');
+    } finally {
+      setIsUploadingPhoto(false);
+    }
+  };
+
   if (!workspaceId || isLoading) return <div className="min-h-screen bg-slate-50 p-8 text-center text-slate-500">Lade Location Hub...</div>;
   if (!location) return null;
 
@@ -195,6 +265,14 @@ export default function LocationHub({ params }: { params: Promise<{ id: string }
                 {location.imageUrl && itemsInLocation.length === 0 && (
                   <p className="text-[10px] text-slate-400 mt-2 text-center">Füge Items hinzu, um Marker zu setzen.</p>
                 )}
+
+                <button
+                  onClick={openPhotoTagging}
+                  className="mt-4 w-full bg-orange-600 text-white font-bold py-3 rounded-xl shadow-md hover:bg-orange-700 transition flex items-center justify-center gap-2"
+                >
+                  📸 Foto-Tagging
+                </button>
+                <p className="text-[10px] text-slate-400 mt-1.5 text-center">Foto aufnehmen & durch Tippen neue Items erfassen.</p>
               </div>
             </div>
 
@@ -394,6 +472,106 @@ export default function LocationHub({ params }: { params: Promise<{ id: string }
             </div>
           </div>
           
+        </div>
+      )}
+
+      {/* 📸 FOTO-TAGGING: Foto aufnehmen & durch Tippen Items erfassen */}
+      {showPhotoTagging && (
+        <div className="fixed inset-0 z-50 bg-slate-900 flex flex-col h-[100dvh] overflow-hidden animate-fade-in">
+
+          {/* Header */}
+          <div className="p-3 md:p-4 flex justify-between items-center bg-slate-900 shadow-md z-10 flex-shrink-0">
+            <div>
+              <h2 className="text-white font-bold text-base md:text-lg flex items-center gap-2">📸 Foto-Tagging</h2>
+              <p className="text-slate-400 text-xs">{location.name} · {itemsInLocation.length} Items</p>
+            </div>
+            <button
+              onClick={() => { setShowPhotoTagging(false); setPendingTag(null); fetchLocationAndItems(); }}
+              className="bg-orange-600 hover:bg-orange-500 text-white px-4 py-2 rounded-lg text-sm font-bold transition"
+            >
+              Fertig
+            </button>
+          </div>
+
+          {!location.imageUrl ? (
+            /* Noch kein Foto -> zuerst aufnehmen */
+            <div className="flex-1 flex flex-col items-center justify-center p-8 text-center">
+              <p className="text-slate-300 mb-6 font-medium max-w-xs">Mach zuerst ein Foto von diesem Ort – danach tippst Du die Items direkt aufs Bild.</p>
+              <label className="bg-orange-600 hover:bg-orange-500 text-white font-bold px-6 py-4 rounded-xl cursor-pointer shadow-lg transition">
+                {isUploadingPhoto ? 'Lädt…' : '📷 Foto aufnehmen'}
+                <input type="file" accept="image/*" capture="environment" onChange={handleCaptureLocationPhoto} className="hidden" disabled={isUploadingPhoto} />
+              </label>
+            </div>
+          ) : (
+            <>
+              {/* Bild-Bereich (Tippen platziert einen neuen Marker) */}
+              <div className="flex-1 p-2 md:p-6 flex items-center justify-center min-h-0 relative">
+                <div className="relative inline-block" style={{ maxWidth: '100%', maxHeight: '100%' }}>
+                  <img
+                    src={location.imageUrl}
+                    alt="Ort"
+                    onClick={handlePhotoTaggingTap}
+                    draggable={false}
+                    className="block max-w-full max-h-full cursor-crosshair border-2 border-slate-800 rounded-lg shadow-2xl"
+                  />
+
+                  {itemsInLocation.map(item => {
+                    if (item.tagX === null || item.tagX === undefined) return null;
+                    return (
+                      <div
+                        key={`pt-${item.id}`}
+                        className="absolute w-4 h-4 bg-green-500 rounded-full border-2 border-white shadow transform -translate-x-1/2 -translate-y-1/2 pointer-events-none"
+                        style={{ left: `${item.tagX}%`, top: `${item.tagY}%` }}
+                      />
+                    );
+                  })}
+
+                  {pendingTag && (
+                    <div
+                      className="absolute w-6 h-6 bg-orange-500 rounded-full border-2 border-white shadow-lg transform -translate-x-1/2 -translate-y-1/2 pointer-events-none animate-pulse ring-4 ring-orange-500/30"
+                      style={{ left: `${pendingTag.x}%`, top: `${pendingTag.y}%` }}
+                    />
+                  )}
+                </div>
+              </div>
+
+              {/* Bottom Sheet: Schnell-Eingabe */}
+              <div className="bg-white flex-shrink-0 p-4 pb-8 shadow-[0_-10px_30px_rgba(0,0,0,0.5)]">
+                {pendingTag ? (
+                  <div className="space-y-3 animate-fade-in">
+                    <label className="text-[10px] font-bold text-slate-500 uppercase">Neues Item an dieser Stelle</label>
+                    <input
+                      type="text"
+                      list="phototag-suggestions"
+                      value={newItemName}
+                      onChange={(e) => setNewItemName(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); createTaggedItem(); } }}
+                      placeholder="Bezeichnung (z.B. Akkuschrauber)"
+                      autoFocus
+                      className="w-full p-3 border border-slate-300 rounded-xl bg-white text-slate-900 outline-none font-bold text-lg focus:border-orange-500"
+                    />
+                    <datalist id="phototag-suggestions">
+                      {allTags.map(t => <option key={t} value={t} />)}
+                    </datalist>
+                    <div className="flex gap-2">
+                      <button onClick={createTaggedItem} disabled={isCreatingItem} className="flex-1 bg-slate-900 text-white font-bold py-3 rounded-xl hover:bg-slate-800 transition disabled:opacity-50">
+                        {isCreatingItem ? 'Speichert…' : '✓ Erfassen'}
+                      </button>
+                      <button onClick={() => { setPendingTag(null); setNewItemName(''); }} className="px-5 bg-slate-100 text-slate-600 font-bold rounded-xl hover:bg-slate-200 transition">
+                        Abbrechen
+                      </button>
+                    </div>
+                    <p className="text-[10px] text-slate-400 text-center">Landet im Eingangskorb – später einsortieren.</p>
+                  </div>
+                ) : (
+                  <div className="text-center">
+                    <p className="text-sm font-bold text-slate-700">Tippe auf das Foto, um ein Item zu erfassen.</p>
+                    <p className="text-[11px] text-slate-400 mt-1">Grüne Punkte = bereits erfasst. Neues Foto? Über „Ort bearbeiten".</p>
+                  </div>
+                )}
+              </div>
+            </>
+          )}
         </div>
       )}
     </>

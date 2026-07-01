@@ -5,6 +5,7 @@ import { db } from '../../lib/firebase';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import Link from 'next/link';
 import { useWorkspace } from '../../context/WorkspaceContext';
+import { isNativePrintAvailable, searchPrinters, getNativeStatus, type BrotherPrinterConfig } from '../../lib/brotherPrint';
 
 export type CategoryConfig = {
   id: string;
@@ -56,6 +57,19 @@ export default function SettingsPage() {
   const [isSaving, setIsSaving] = useState(false);
   const [toast, setToast] = useState('');
 
+  // 🖨️ Brother-Etikettendrucker (nur in der Android-App relevant)
+  const [brotherPrinter, setBrotherPrinter] = useState<BrotherPrinterConfig>({
+    model: 'PT_P710BT',
+    labelName: 'W24',
+    port: 'BLUETOOTH',
+    channelInfo: '',
+  });
+  const [isSearchingPrinter, setIsSearchingPrinter] = useState(false);
+  const [printerStatus, setPrinterStatus] = useState<{ native: boolean; pluginFound: boolean } | null>(null);
+
+  // Diagnose: erst nach dem Mounten prüfen (window/Capacitor vorhanden).
+  useEffect(() => { setPrinterStatus(getNativeStatus()); }, []);
+
   // Formular-States
   const [editingId, setEditingId] = useState<string | null>(null);
   const [newIcon, setNewIcon] = useState('📦');
@@ -74,6 +88,7 @@ export default function SettingsPage() {
         if (snap.exists()) {
           const data = snap.data();
           setOwnerName(data.ownerName || '');
+          if (data.brotherPrinter) setBrotherPrinter(data.brotherPrinter);
           setPreferredShops(data.preferredShops || ['galaxus', 'hornbach', 'migros', 'coop']);
           setCustomShops(data.customShops || []);
 
@@ -105,8 +120,9 @@ export default function SettingsPage() {
     try {
       await setDoc(doc(db, 'workspaces', workspaceId!, 'settings', 'main'), {
         ownerName,
-        preferredShops, 
-        customShops, 
+        brotherPrinter,
+        preferredShops,
+        customShops,
         categories: updatedCategories
       }, { merge: true });
       
@@ -116,6 +132,37 @@ export default function SettingsPage() {
       alert("Fehler beim Speichern");
     } finally {
       setIsSaving(false);
+    }
+  };
+
+  const handleSearchPrinter = async () => {
+    const status = getNativeStatus();
+    setPrinterStatus(status);
+    if (!status.native) {
+      alert('🔎 Die Druckersuche funktioniert nur in der Android-App. Im PC-Browser bitte die MAC-Adresse manuell eintragen.');
+      return;
+    }
+    if (!status.pluginFound) {
+      alert('⚠️ Das Brother-Plugin wurde nicht gefunden. Wurde nach dem Einbinden `npx cap sync` ausgeführt und die App neu gebaut? (Details unter „Status" in dieser Sektion.)');
+      return;
+    }
+    if (!isNativePrintAvailable()) return;
+    setIsSearchingPrinter(true);
+    try {
+      const found = await searchPrinters(brotherPrinter.port);
+      if (found.length === 0) {
+        alert('Kein Drucker gefunden. Ist der Cube eingeschaltet und in den Bluetooth-Einstellungen gekoppelt?');
+      } else {
+        const p = found[0];
+        setBrotherPrinter(prev => ({
+          ...prev,
+          channelInfo: p.macAddress || p.ipAddress || p.channelInfo || prev.channelInfo,
+          model: p.model || prev.model,
+        }));
+        alert(`✅ Gefunden: ${p.modelName || p.model || 'Drucker'} (${p.macAddress || p.ipAddress || '?'})`);
+      }
+    } finally {
+      setIsSearchingPrinter(false);
     }
   };
 
@@ -219,6 +266,81 @@ export default function SettingsPage() {
               <input type="text" value={ownerName} onChange={(e) => setOwnerName(e.target.value)} placeholder="z.B. ShedSync HQ oder Janick" className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none font-medium text-slate-800 focus:border-orange-500 transition" />
             </div>
           </div>
+        </div>
+
+        {/* 🖨️ ETIKETTENDRUCKER */}
+        <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 mb-8">
+          <div className="mb-4">
+            <h2 className="text-sm font-bold text-slate-400 uppercase tracking-wider mb-1">🖨️ Etikettendrucker (Brother)</h2>
+            <p className="text-xs text-slate-500">Für den Direktdruck per Bluetooth in der Android-App. Im PC-/iPhone-Browser wird stattdessen der normale Druckdialog genutzt.</p>
+          </div>
+
+          {/* Diagnose-Status */}
+          {printerStatus && (
+            <div className="mb-4 flex flex-wrap gap-2 text-[11px] font-bold">
+              <span className={`px-2 py-1 rounded border ${printerStatus.native ? 'bg-green-50 text-green-700 border-green-200' : 'bg-slate-100 text-slate-500 border-slate-200'}`}>
+                {printerStatus.native ? '✅ Läuft in der App' : '🌐 Läuft im Browser'}
+              </span>
+              {printerStatus.native && (
+                <span className={`px-2 py-1 rounded border ${printerStatus.pluginFound ? 'bg-green-50 text-green-700 border-green-200' : 'bg-red-50 text-red-700 border-red-200'}`}>
+                  {printerStatus.pluginFound ? '✅ Brother-Plugin gefunden' : '❌ Brother-Plugin NICHT gefunden'}
+                </span>
+              )}
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-semibold text-slate-500 mb-1">Modell</label>
+              <input
+                type="text"
+                value={brotherPrinter.model}
+                onChange={(e) => setBrotherPrinter({ ...brotherPrinter, model: e.target.value })}
+                placeholder="z.B. PT_P710BT"
+                className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none font-mono text-sm text-slate-800 focus:border-orange-500"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-500 mb-1">Tape / Label-Größe</label>
+              <input
+                type="text"
+                value={brotherPrinter.labelName}
+                onChange={(e) => setBrotherPrinter({ ...brotherPrinter, labelName: e.target.value })}
+                placeholder="z.B. W24 (= 24mm)"
+                className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none font-mono text-sm text-slate-800 focus:border-orange-500"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-500 mb-1">Verbindung</label>
+              <select
+                value={brotherPrinter.port}
+                onChange={(e) => setBrotherPrinter({ ...brotherPrinter, port: e.target.value as BrotherPrinterConfig['port'] })}
+                className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none text-sm font-medium text-slate-800 focus:border-orange-500"
+              >
+                <option value="BLUETOOTH">Bluetooth</option>
+                <option value="NET">WLAN</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-500 mb-1">MAC-Adresse / IP</label>
+              <input
+                type="text"
+                value={brotherPrinter.channelInfo}
+                onChange={(e) => setBrotherPrinter({ ...brotherPrinter, channelInfo: e.target.value })}
+                placeholder="z.B. AB:CD:EF:12:34:56"
+                className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none font-mono text-sm text-slate-800 focus:border-orange-500"
+              />
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={handleSearchPrinter}
+            disabled={isSearchingPrinter}
+            className="mt-4 w-full sm:w-auto bg-slate-800 text-white font-bold px-4 py-3 rounded-xl hover:bg-slate-700 transition disabled:opacity-50"
+          >
+            {isSearchingPrinter ? '🔎 Suche…' : '🔎 Drucker suchen (Android-App)'}
+          </button>
         </div>
 
         {/* 🛒 ONLINE-SHOPS */}

@@ -1,0 +1,146 @@
+// Brother-Druck-Adapter (Capacitor + Brother Print SDK via Cordova-Plugin).
+//
+// Nutzt das Plugin "AbobosSoftware/cordova-plugin-brother-label-printer", das
+// das native Brother Print SDK bündelt und den PT-P710BT unterstützt.
+// Zugriff im WebView über das globale `cordova.plugins.brotherPrinter`.
+//
+// ⚠️ Alle Brother-/Plugin-spezifischen Details leben NUR hier.
+//
+// Der native Druck (Bluetooth an den Cube) läuft nur in der Android-App
+// (Capacitor). Im PC-/iPhone-Browser ist isNativePrintAvailable() = false und
+// die App fällt automatisch auf window.print() zurück.
+import { Capacitor } from '@capacitor/core';
+import { renderLabelToPng, type LabelItem } from './labelImage';
+
+// Konfiguration des gekoppelten Druckers (in den Settings gespeichert).
+export type BrotherPrinterConfig = {
+  model: string;       // Brother-SDK-Modell, z.B. 'PT_P710BT'
+  labelName: string;   // Tape-Größe, z.B. 'W24' (= 24mm-Tape)
+  port: 'BLUETOOTH' | 'NET';
+  channelInfo: string; // Bluetooth: MAC-Adresse, NET: IP-Adresse
+};
+
+export type FoundPrinter = {
+  model?: string;
+  modelName?: string;
+  macAddress?: string;
+  ipAddress?: string;
+  port?: string;
+  [k: string]: any;
+};
+
+// JS-Interface des Cordova-Plugins (callback-basiert).
+interface BrotherCordovaPlugin {
+  findBluetoothPrinters(success: (printers: FoundPrinter[]) => void, error: (msg: string) => void): void;
+  findNetworkPrinters(success: (printers: FoundPrinter[]) => void, error: (msg: string) => void): void;
+  setPrinter(printer: Record<string, any>, success: () => void, error: (msg: string) => void): void;
+  printViaSDK(base64: string, success: (result: { result: string }) => void, error?: (msg: string) => void): void;
+}
+
+function getPlugin(): BrotherCordovaPlugin | null {
+  if (typeof window === 'undefined') return null;
+  return (window as any)?.cordova?.plugins?.brotherPrinter ?? null;
+}
+
+// Läuft die App nativ (Android via Capacitor) UND ist das Plugin verfügbar?
+export function isNativePrintAvailable(): boolean {
+  try {
+    return Capacitor.isNativePlatform() && !!getPlugin();
+  } catch {
+    return false;
+  }
+}
+
+// Diagnose: läuft die App nativ, und ist das Cordova-Plugin eingespritzt?
+export function getNativeStatus(): { native: boolean; pluginFound: boolean } {
+  let native = false;
+  try { native = Capacitor.isNativePlatform(); } catch { /* ignore */ }
+  return { native, pluginFound: !!getPlugin() };
+}
+
+// Ist ein Drucker konfiguriert und nativer Druck möglich?
+export function canPrintNative(cfg?: BrotherPrinterConfig | null): cfg is BrotherPrinterConfig {
+  return isNativePrintAvailable() && !!cfg && !!cfg.channelInfo && !!cfg.model;
+}
+
+function setPrinterAsync(plugin: BrotherCordovaPlugin, cfg: BrotherPrinterConfig, copies: number): Promise<void> {
+  return new Promise((resolve, reject) => {
+    plugin.setPrinter(
+      {
+        model: cfg.model,
+        modelName: cfg.model,
+        port: cfg.port,
+        macAddress: cfg.port === 'BLUETOOTH' ? cfg.channelInfo : undefined,
+        ipAddress: cfg.port === 'NET' ? cfg.channelInfo : undefined,
+        paperLabelName: cfg.labelName,
+        numberOfCopies: copies,
+      },
+      () => resolve(),
+      (e) => reject(new Error(e))
+    );
+  });
+}
+
+function printImageAsync(plugin: BrotherCordovaPlugin, base64: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    plugin.printViaSDK(
+      base64,
+      (res) => {
+        if (res && res.result === 'ERROR_NONE') resolve();
+        else reject(new Error(res?.result || 'Unbekannter Druckfehler'));
+      },
+      (e) => reject(new Error(e))
+    );
+  });
+}
+
+// Druckt eine Liste Items nativ. Gibt true zurück, wenn der native Weg
+// genommen wurde (auch bei Fehler -> kein doppelter window.print-Fallback).
+export async function tryPrintNative(
+  items: LabelItem[],
+  ownerName: string,
+  cfg: BrotherPrinterConfig | null | undefined,
+  origin: string,
+  copies = 1
+): Promise<boolean> {
+  if (!canPrintNative(cfg)) return false;
+  const plugin = getPlugin();
+  if (!plugin) return false;
+
+  try {
+    await setPrinterAsync(plugin, cfg, copies);
+    for (const item of items) {
+      const encodedImage = await renderLabelToPng(item, ownerName, origin);
+      await printImageAsync(plugin, encodedImage);
+    }
+  } catch (e) {
+    console.error('Brother-Druck fehlgeschlagen:', e);
+    alert('❌ Druck fehlgeschlagen: ' + (e as Error).message + '\nIst der Drucker eingeschaltet und gekoppelt?');
+  }
+  return true;
+}
+
+// Sucht erreichbare Drucker (nur nativ). Mit Timeout, damit die Suche nie
+// still hängt, falls das Plugin keine Callback aufruft.
+export async function searchPrinters(
+  port: BrotherPrinterConfig['port'] = 'BLUETOOTH',
+  timeoutMs = 12000
+): Promise<FoundPrinter[]> {
+  const plugin = getPlugin();
+  if (!isNativePrintAvailable() || !plugin) return [];
+
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = (r: FoundPrinter[]) => { if (!done) { done = true; resolve(r); } };
+    const timer = setTimeout(() => finish([]), timeoutMs);
+    const onOk = (printers: FoundPrinter[]) => { clearTimeout(timer); finish(printers || []); };
+    const onErr = () => { clearTimeout(timer); finish([]); };
+    try {
+      if (port === 'NET') plugin.findNetworkPrinters(onOk, onErr);
+      else plugin.findBluetoothPrinters(onOk, onErr);
+    } catch {
+      clearTimeout(timer);
+      finish([]);
+    }
+  });
+}

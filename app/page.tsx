@@ -4,19 +4,23 @@ import { useEffect, useState, useMemo } from 'react';
 import { db } from '../lib/firebase';
 import { collection, getDocs, orderBy, query, writeBatch, doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
 import Link from 'next/link';
-import { useWorkspace } from '../context/WorkspaceContext'; 
+import QRCode from 'react-qr-code';
+import { useWorkspace } from '../context/WorkspaceContext';
+import { tryPrintNative } from '../lib/brotherPrint';
 
 export default function Dashboard() {
   // 1. WORKSPACE LOGIK
   const { workspaceId, setWorkspaceId, isLoading: isWorkspaceLoading } = useWorkspace();
   const [loginInput, setLoginInput] = useState('');
-  const [isMigrating, setIsMigrating] = useState(false);
 
   // 2. DASHBOARD STATES
   const [items, setItems] = useState<any[]>([]);
   const [locations, setLocations] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [categories, setCategories] = useState<any[]>([]);
+  const [ownerName, setOwnerName] = useState('');
+  const [brotherPrinter, setBrotherPrinter] = useState<any>(null);
+  const [printItems, setPrintItems] = useState<any[]>([]);
   
   // 🔥 NEU: Tab Navigation
   const [activeTab, setActiveTab] = useState<'inventory' | 'inbox' | 'shopping'>('inventory');
@@ -47,8 +51,11 @@ export default function Dashboard() {
       setLocations(locList);
       
       const settingsSnap = await getDoc(doc(workspaceRef, 'settings', 'main'));
-      if (settingsSnap.exists() && settingsSnap.data().categories) {
-        setCategories(settingsSnap.data().categories);
+      if (settingsSnap.exists()) {
+        const settingsData = settingsSnap.data();
+        if (settingsData.categories) setCategories(settingsData.categories);
+        setOwnerName(settingsData.ownerName || '');
+        setBrotherPrinter(settingsData.brotherPrinter || null);
       }
 
       const itemsQuery = query(collection(workspaceRef, 'items'), orderBy('createdAt', 'desc'));
@@ -65,7 +72,7 @@ export default function Dashboard() {
         initialExpanded[getRootLocationName(item.locationId, locList)] = true;
         initialExpanded[item.category || 'ALLGEMEIN'] = true;
       });
-      setExpandedGroups({});
+      setExpandedGroups(initialExpanded);
     } catch (error) {
       console.error("Fehler beim Laden der Workspace-Daten:", error);
     } finally {
@@ -86,44 +93,6 @@ export default function Dashboard() {
       }
     }
   }, [workspaceId]);
-
-  // MIGRATIONS-SKRIPT
-  const handleMigration = async () => {
-    if (!workspaceId) return;
-    if (!confirm("🚨 ACHTUNG: Möchtest du wirklich alle alten Daten aus dem Hauptverzeichnis in diesen Workspace kopieren? Mache das nur 1x!")) return;
-    
-    setIsMigrating(true);
-    try {
-      const targetWorkspace = doc(db, 'workspaces', workspaceId);
-      const batch = writeBatch(db);
-      
-      const oldItems = await getDocs(collection(db, 'workspaces', workspaceId!, 'items'));
-      oldItems.forEach(docSnap => {
-        const newRef = doc(collection(targetWorkspace, 'items'), docSnap.id);
-        batch.set(newRef, docSnap.data());
-      });
-
-      const oldLocs = await getDocs(collection(db, 'workspaces', workspaceId!, 'locations'));
-      oldLocs.forEach(docSnap => {
-        const newRef = doc(collection(targetWorkspace, 'locations'), docSnap.id);
-        batch.set(newRef, docSnap.data());
-      });
-
-      const oldSettings = await getDoc(doc(db, 'workspaces', workspaceId!, 'settings', 'main'));
-      if (oldSettings.exists()) {
-        batch.set(doc(targetWorkspace, 'settings', 'main'), oldSettings.data());
-      }
-
-      await batch.commit();
-      alert("✅ Migration erfolgreich! Lade Seite neu...");
-      fetchData();
-    } catch (e) {
-      console.error(e);
-      alert("Fehler bei der Migration.");
-    } finally {
-      setIsMigrating(false);
-    }
-  };
 
   // 🔥 NEU: Tab-Spezifische Filterung
   const inboxItemsCount = items.filter(i => !i.category || i.category.trim() === '').length;
@@ -275,6 +244,25 @@ export default function Dashboard() {
     }
   };
 
+  // 🏷️ Sammeldruck: QR-Etiketten aller markierten Items.
+  // Nativ (Android-App): direkt per Bluetooth an den Brother-Drucker.
+  // Sonst (PC/iPhone-Browser): window.print() (ein Label pro Tape-Abschnitt).
+  const handlePrintLabels = async () => {
+    const selected = items.filter(i => selectedItemIds.has(i.id));
+    if (selected.length === 0) return;
+
+    const handled = await tryPrintNative(
+      selected.map(i => ({ id: i.id, name: i.name })),
+      ownerName,
+      brotherPrinter,
+      window.location.origin
+    );
+    if (handled) return;
+
+    setPrintItems(selected);
+    setTimeout(() => { window.print(); }, 300);
+  };
+
   const getHierarchicalLocations = () => {
     const buildTree = (parentId: string | null, depth: number): any[] => {
       let result: any[] = [];
@@ -351,8 +339,9 @@ export default function Dashboard() {
   if (loading) return <div className="min-h-screen bg-slate-50 flex items-center justify-center text-slate-500 font-medium">Lade Werkstatt '{workspaceId}'...</div>;
 
   return (
-    <div className={`min-h-screen bg-slate-50 ${isSelectionMode ? 'pb-40' : 'pb-20'}`}>
-      
+    <>
+    <div className={`min-h-screen bg-slate-50 print:hidden ${isSelectionMode ? 'pb-40' : 'pb-20'}`}>
+
       <header className="bg-slate-900 text-white pt-6 pb-6 px-4 md:px-8 shadow-md transition-all sticky top-0 z-40">
         <div className="max-w-5xl mx-auto flex justify-between items-center">
           
@@ -649,6 +638,7 @@ export default function Dashboard() {
                 <button onClick={() => setBulkAction('category')} className="flex-1 sm:flex-none bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold py-2.5 px-3 rounded-lg border border-slate-600 transition">🏷️ Typ</button>
                 <button onClick={() => setBulkAction('addTag')} className="flex-1 sm:flex-none bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold py-2.5 px-3 rounded-lg border border-slate-600 transition">➕ Tag</button>
                 <button onClick={() => setBulkAction('removeTag')} className="flex-1 sm:flex-none bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold py-2.5 px-3 rounded-lg border border-slate-600 transition">➖ Tag</button>
+                <button onClick={handlePrintLabels} className="flex-1 sm:flex-none bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold py-2.5 px-3 rounded-lg border border-slate-600 transition">🏷️ Etiketten</button>
                 <button onClick={() => setBulkAction('delete')} className="bg-red-900/50 hover:bg-red-800 text-red-400 hover:text-white text-xs font-bold py-2.5 px-3 rounded-lg border border-red-900/50 transition">🗑️</button>
               </div>
             )}
@@ -722,5 +712,19 @@ export default function Dashboard() {
       )}
 
     </div>
+
+    {/* 🏷️ Sammeldruck: ein QR-Etikett pro markiertem Item */}
+    <div className="hidden print:block">
+      {printItems.map(it => (
+        <div key={it.id} className="flex items-center gap-2 p-1" style={{ breakAfter: 'page', maxWidth: '70mm' }}>
+          <QRCode value={`${typeof window !== 'undefined' ? window.location.origin : ''}/item/${it.id}`} size={64} level="M" />
+          <div className="text-left min-w-0">
+            <p className="text-sm font-black uppercase tracking-tight text-black leading-tight break-words">{it.name || 'Item'}</p>
+            {ownerName && <p className="text-[9px] font-bold text-black mt-0.5">{ownerName}</p>}
+          </div>
+        </div>
+      ))}
+    </div>
+    </>
   );
 }

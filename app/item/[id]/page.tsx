@@ -6,6 +6,7 @@ import { doc, getDoc, updateDoc, collection, addDoc, query, where, getDocs } fro
 import Link from 'next/link';
 import QRCode from 'react-qr-code';
 import { useWorkspace } from '../../../context/WorkspaceContext';
+import { tryPrintNative } from '../../../lib/brotherPrint';
 
 // 🛒 DAS SHOP-LEXIKON FÜR DIE SCHNELLSUCHE
 const SUPPORTED_SHOPS: Record<string, { name: string, style: string, urlPattern: string }> = {
@@ -32,8 +33,10 @@ export default function ItemDetail({ params }: { params: Promise<{ id: string }>
   const [expectedReturn, setExpectedReturn] = useState('');
 
   const [printLoan, setPrintLoan] = useState<any>(null);
+  const [printLabel, setPrintLabel] = useState(false);
   const [ownerName, setOwnerName] = useState('');
-  const [lendableTags, setLendableTags] = useState<Record<string, boolean>>({});
+  const [brotherPrinter, setBrotherPrinter] = useState<any>(null);
+  const [lendableCategories, setLendableCategories] = useState<Record<string, boolean>>({});
   
   // 🛒 EINSTELLUNGEN FÜR DIE SHOPS
   const [preferredShops, setPreferredShops] = useState<string[]>([]);
@@ -70,14 +73,15 @@ export default function ItemDetail({ params }: { params: Promise<{ id: string }>
       if (settingsSnap.exists()) {
         const data = settingsSnap.data();
         setOwnerName(data.ownerName || 'ShedSync');
+        setBrotherPrinter(data.brotherPrinter || null);
         setPreferredShops(data.preferredShops || ['galaxus', 'hornbach', 'migros', 'coop']);
         setCustomShops(data.customShops || []);
 
-        const tagMap: Record<string, boolean> = {};
+        const categoryMap: Record<string, boolean> = {};
         if (data.categories) {
-          data.categories.forEach((c: any) => tagMap[c.name] = c.lendable);
+          data.categories.forEach((c: any) => categoryMap[c.name] = c.lendable);
         }
-        setLendableTags(tagMap);
+        setLendableCategories(categoryMap);
       } else {
         setPreferredShops(['galaxus', 'hornbach', 'migros', 'coop']);
       }
@@ -180,6 +184,21 @@ export default function ItemDetail({ params }: { params: Promise<{ id: string }>
     setTimeout(() => { window.print(); }, 200);
   };
 
+  // 🏷️ Item-QR-Etikett drucken (scannt zurück auf diese Item-Seite)
+  // Nativ (Android-App): direkt per Bluetooth an den Brother-Drucker.
+  // Sonst (PC/iPhone-Browser): window.print()-Fallback.
+  const handlePrintLabel = async () => {
+    const handled = await tryPrintNative(
+      [{ id: item.id, name: item.name }],
+      ownerName,
+      brotherPrinter,
+      window.location.origin
+    );
+    if (handled) return;
+    setPrintLabel(true);
+    setTimeout(() => { window.print(); }, 200);
+  };
+
   const checkWarranty = (dateString: string) => {
     if (!dateString) return null;
     const purchaseDate = new Date(dateString);
@@ -202,7 +221,7 @@ export default function ItemDetail({ params }: { params: Promise<{ id: string }>
   const lentQty = activeLoans.reduce((sum, loan) => sum + loan.quantity, 0);
   const availableQty = totalQty - lentQty;
 
-  const isLendable = !item.tags?.some((tag: string) => lendableTags[tag] === false);
+  const isLendable = lendableCategories[item.category] !== false;
   const searchQuery = encodeURIComponent(item.ean || item.name);
 
   return (
@@ -230,12 +249,19 @@ export default function ItemDetail({ params }: { params: Promise<{ id: string }>
                 <div className="w-full flex flex-col sm:flex-row justify-between items-start gap-4 mb-2">
                   <h1 className="text-3xl font-bold text-slate-900 leading-tight">{item.name}</h1>
                   <div className="flex items-center gap-2 shrink-0">
-                    <button 
+                    <button
                       onClick={handleShareToShoppingList}
                       className="bg-orange-100 hover:bg-orange-200 text-orange-700 px-3 py-2 rounded-lg transition text-sm font-bold flex items-center gap-2"
                       title="Auf Einkaufsliste setzen"
                     >
                       🛒 <span className="hidden sm:inline">Einkauf</span>
+                    </button>
+                    <button
+                      onClick={handlePrintLabel}
+                      className="bg-slate-100 hover:bg-slate-200 text-slate-600 px-3 py-2 rounded-lg transition text-sm font-medium"
+                      title="QR-Etikett drucken"
+                    >
+                      🖨️ <span className="hidden sm:inline">Etikett</span>
                     </button>
                     <Link href={`/item/${item.id}/edit`} className="bg-slate-100 hover:bg-slate-200 text-slate-600 px-3 py-2 rounded-lg transition text-sm font-medium">
                       ✏️ Bearbeiten
@@ -473,6 +499,20 @@ export default function ItemDetail({ params }: { params: Promise<{ id: string }>
           </div>
         )}
       </div>
+
+      {/* 🏷️ Item-QR-Etikett (Endlos-Tape: QR links, Text rechts) */}
+      {printLabel && (
+        <div className="hidden print:flex fixed inset-0 bg-white items-center justify-center">
+          <div className="flex items-center gap-2 p-1" style={{ maxWidth: '70mm' }}>
+            <QRCode value={window.location.href} size={64} level="M" />
+            <div className="text-left min-w-0">
+              <p className="text-sm font-black uppercase tracking-tight text-black leading-tight break-words">{item.name}</p>
+              {location?.code && <p className="text-[9px] font-mono text-black mt-0.5">📍 {location.code}</p>}
+              {ownerName && <p className="text-[9px] font-bold text-black mt-0.5">{ownerName}</p>}
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }

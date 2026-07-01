@@ -126,6 +126,14 @@ export default function SuperScanner() {
           showToast("Prüfe Datenbank...", "info", 10000);
 
           try {
+            // 0. ITEM-QR GESCANNT? (Link auf /item/<id> aus unserem Etikett)
+            const itemLinkMatch = decodedText.match(/\/item\/([^/?#]+)/);
+            if (itemLinkMatch) {
+              scannerInstance.clear();
+              router.push(`/item/${itemLinkMatch[1]}`);
+              return;
+            }
+
             // 1. LAGERORT GESCANNT?
             const locQuery = query(collection(db, 'workspaces', workspaceId, 'locations'), where('code', '==', decodedText));
             const locSnap = await getDocs(locQuery);

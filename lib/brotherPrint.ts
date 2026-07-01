@@ -42,6 +42,28 @@ function getPlugin(): BrotherCordovaPlugin | null {
   return (window as any)?.cordova?.plugins?.brotherPrinter ?? null;
 }
 
+// Fordert die Bluetooth-Laufzeitrechte an (nötig, damit Android den gekoppelten
+// Drucker überhaupt auflistet). Braucht das Plugin cordova-plugin-android-permissions.
+export type PermResult = 'granted' | 'denied' | 'unavailable';
+
+export async function requestBluetoothPermissions(): Promise<PermResult> {
+  if (typeof window === 'undefined') return 'unavailable';
+  const perms = (window as any)?.cordova?.plugins?.permissions;
+  if (!perms || typeof perms.requestPermissions !== 'function') return 'unavailable';
+
+  const list = [
+    'android.permission.BLUETOOTH_CONNECT',
+    'android.permission.BLUETOOTH_SCAN',
+  ];
+  return new Promise((resolve) => {
+    perms.requestPermissions(
+      list,
+      (status: any) => resolve(status?.hasPermission ? 'granted' : 'denied'),
+      () => resolve('denied')
+    );
+  });
+}
+
 // Läuft die App nativ (Android via Capacitor) UND ist das Plugin verfügbar?
 export function isNativePrintAvailable(): boolean {
   try {
@@ -108,6 +130,7 @@ export async function tryPrintNative(
   if (!plugin) return false;
 
   try {
+    await requestBluetoothPermissions(); // best-effort; ohne Recht kein BT-Zugriff
     await setPrinterAsync(plugin, cfg, copies);
     for (const item of items) {
       const encodedImage = await renderLabelToPng(item, ownerName, origin);

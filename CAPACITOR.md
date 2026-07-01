@@ -64,6 +64,19 @@ Capacitor erkennt das Cordova-Plugin automatisch. Es bündelt das Brother Print
 SDK für Android und stellt im WebView `cordova.plugins.brotherPrinter` bereit —
 genau das, was `lib/brotherPrint.ts` anspricht. **Kein Code-Anpassen nötig.**
 
+## 2b. Plugin für Bluetooth-Laufzeitrechte
+
+Android 12+ zeigt/gewährt die Bluetooth-Rechte erst, wenn die App sie zur
+Laufzeit **aktiv anfragt** (die Manifest-Einträge allein reichen nicht). Dafür:
+
+```bash
+npm install cordova-plugin-android-permissions
+npx cap sync
+```
+
+Damit fragt die App beim ersten „Drucker suchen" den Android-Dialog ab. Ohne
+dieses Plugin bleibt die Druckersuche leer.
+
 ## 3. Bluetooth-Berechtigungen (Android 12+)
 
 In `android/app/src/main/AndroidManifest.xml` innerhalb von `<manifest>`:

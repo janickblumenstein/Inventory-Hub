@@ -2,6 +2,7 @@ import './globals.css'
 import type { Metadata } from 'next'
 import { Inter } from 'next/font/google'
 import { WorkspaceProvider } from '../context/WorkspaceContext' // <--- NEU
+import BackButtonHandler from '../components/BackButtonHandler'
 
 const inter = Inter({ subsets: ['latin'] })
 
@@ -20,6 +21,7 @@ export default function RootLayout({
       <body className={inter.className}>
         {/* NEU: Der Wächter umschließt die gesamte App */}
         <WorkspaceProvider>
+          <BackButtonHandler />
           {children}
         </WorkspaceProvider>
       </body>

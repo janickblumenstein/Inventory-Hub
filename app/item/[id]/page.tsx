@@ -101,11 +101,17 @@ export default function ItemDetail({ params }: { params: Promise<{ id: string }>
   const handleShareToShoppingList = async () => {
     if (!item) return;
     const bringFriendlyText = `${item.quantity}x ${item.name}`;
+    if (typeof navigator !== 'undefined' && navigator.share) {
+      try {
+        await navigator.share({ title: 'Einkauf', text: bringFriendlyText });
+        return;
+      } catch { /* abgebrochen -> Fallback */ }
+    }
     try {
       await navigator.clipboard.writeText(bringFriendlyText);
-      alert(`✅ Kopiert: "${bringFriendlyText}"\n\nÖffne jetzt einfach deine Bring! App. Sie wird den Text erkennen und dich fragen, ob du ihn einfügen möchtest.`);
+      alert(`✅ Kopiert: "${bringFriendlyText}"\n\nÖffne jetzt Deine Bring!-App und füge den Text ein.`);
     } catch (error) {
-      alert("Kopieren fehlgeschlagen. Bitte manuell eintragen.");
+      alert("Teilen/Kopieren fehlgeschlagen. Bitte manuell eintragen.");
     }
   };
 

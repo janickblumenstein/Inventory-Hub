@@ -7,6 +7,7 @@ import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { useWorkspace } from '../../context/WorkspaceContext';
+import { requestCameraPermission } from '../../lib/brotherPrint';
 
 // 🛒 DAS MASTER-LEXIKON: Alle unterstützten Shops
 const SUPPORTED_SHOPS: Record<string, { name: string, urlPattern: string, style: string }> = {
@@ -114,6 +115,7 @@ export default function SuperScanner() {
     let scannerInstance: any = null;
 
     const initializeScanner = async () => {
+      await requestCameraPermission(); // in der App: Kamera-Recht anfordern
       const { Html5QrcodeScanner } = await import('html5-qrcode');
 
       scannerInstance = new Html5QrcodeScanner("reader", { fps: 10, qrbox: { width: 250, height: 250 }, rememberLastUsedCamera: true }, false);

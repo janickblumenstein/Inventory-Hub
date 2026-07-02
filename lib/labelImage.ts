@@ -24,6 +24,7 @@ export type LabelLocation = {
 export type LabelLoan = {
   borrowerName?: string;
   quantity?: number;
+  borrowDate?: string | null;
   expectedReturnDate?: string | null;
 };
 
@@ -81,13 +82,46 @@ function fitText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number, 
   return { text: t + (t !== text ? '…' : ''), font: ctx.font };
 }
 
-function fitLines(ctx: CanvasRenderingContext2D, lines: Line[], maxTextWidth: number): FittedLine[] {
+// Titel einpassen: erst schrumpfend in einer Zeile versuchen, dann auf
+// zwei Zeilen umbrechen (Wortgrenzen) statt abzuschneiden.
+function fitTitle(ctx: CanvasRenderingContext2D, text: string, maxWidth: number, maxLines: 1 | 2): FittedLine[] {
+  const family = 'Arial, sans-serif';
+  for (let size = 34; size >= 20; size -= 2) {
+    ctx.font = `bold ${size}px ${family}`;
+    if (ctx.measureText(text).width <= maxWidth) return [{ text, font: ctx.font, h: size + 6 }];
+  }
+  if (maxLines === 2) {
+    const size = 24;
+    ctx.font = `bold ${size}px ${family}`;
+    const words = text.split(/\s+/);
+    let line1 = '';
+    let i = 0;
+    while (i < words.length) {
+      const test = line1 ? `${line1} ${words[i]}` : words[i];
+      if (ctx.measureText(test).width <= maxWidth) { line1 = test; i++; }
+      else break;
+    }
+    // Nur wenn ein sauberer Wortumbruch möglich ist, zweizeilig rendern.
+    if (line1 && i > 0 && i < words.length) {
+      const rest = words.slice(i).join(' ');
+      let line2 = rest;
+      while (line2.length > 1 && ctx.measureText(line2 + '…').width > maxWidth) line2 = line2.slice(0, -1);
+      return [
+        { text: line1, font: ctx.font, h: size + 5 },
+        { text: line2 + (line2 !== rest ? '…' : ''), font: ctx.font, h: size + 5 },
+      ];
+    }
+  }
+  return [{ ...fitText(ctx, text, maxWidth, 20, 18, 'bold', family), h: 26 }];
+}
+
+function fitLines(ctx: CanvasRenderingContext2D, lines: Line[], maxTextWidth: number, maxTitleLines: 1 | 2): FittedLine[] {
   return lines
     .filter(l => l.text.trim() !== '')
-    .map(l => {
-      if (l.kind === 'title') return { ...fitText(ctx, l.text, maxTextWidth, 34, 18, 'bold', 'Arial, sans-serif'), h: 38 };
-      if (l.kind === 'mono') return { ...fitText(ctx, l.text, maxTextWidth, 22, 14, 'bold', 'monospace'), h: 26 };
-      return { ...fitText(ctx, l.text, maxTextWidth, 18, 12, 'normal', 'Arial, sans-serif'), h: 22 };
+    .flatMap(l => {
+      if (l.kind === 'title') return fitTitle(ctx, l.text, maxTextWidth, maxTitleLines);
+      if (l.kind === 'mono') return [{ ...fitText(ctx, l.text, maxTextWidth, 22, 14, 'bold', 'monospace'), h: 26 }];
+      return [{ ...fitText(ctx, l.text, maxTextWidth, 18, 12, 'normal', 'Arial, sans-serif'), h: 22 }];
     });
 }
 
@@ -104,9 +138,9 @@ function applyThreshold(ctx: CanvasRenderingContext2D, width: number, height: nu
   ctx.putImageData(imageData, 0, 0);
 }
 
-async function renderLabel(qrUrl: string, lines: Line[], maxLengthMm: number): Promise<string> {
+async function renderLabel(qrUrl: string, lines: Line[], maxLengthMm: number, maxTitleLines: 1 | 2 = 2): Promise<string> {
   const height = LABEL_HEIGHT;
-  const maxWidth = Math.max(mmToPx(maxLengthMm), height + 40);
+  const maxWidth = Math.max(mmToPx(Math.max(maxLengthMm, 30)), height + 40);
 
   const canvas = document.createElement('canvas');
   const ctx = canvas.getContext('2d');
@@ -117,7 +151,12 @@ async function renderLabel(qrUrl: string, lines: Line[], maxLengthMm: number): P
   const textX = qrX + qrImg.width + 8;
 
   // Phase 1: Zeilen gegen die maximal verfügbare Breite einpassen und messen.
-  const fitted = fitLines(ctx, lines, maxWidth - textX - 6);
+  let fitted = fitLines(ctx, lines, maxWidth - textX - 6, maxTitleLines);
+  // Passt es in der Höhe nicht (z.B. 2-zeiliger Titel + viele Infozeilen),
+  // den Titel auf eine Zeile reduzieren.
+  if (fitted.reduce((s, l) => s + l.h, 0) > height - 2 && maxTitleLines === 2) {
+    fitted = fitLines(ctx, lines, maxWidth - textX - 6, 1);
+  }
   let actualTextWidth = 0;
   for (const line of fitted) {
     ctx.font = line.font;
@@ -125,7 +164,10 @@ async function renderLabel(qrUrl: string, lines: Line[], maxLengthMm: number): P
   }
 
   // Etikett nur so lang wie nötig (Inhalt), gedeckelt durch das Maximum.
-  const width = Math.min(maxWidth, Math.ceil(textX + actualTextWidth + 8));
+  // Ohne Textzeilen (nur QR) wird es minimal: QR + Rand.
+  const width = fitted.length === 0
+    ? qrImg.width + 8
+    : Math.min(maxWidth, Math.ceil(textX + actualTextWidth + 8));
 
   // Phase 2: Canvas final dimensionieren (setzt den Kontext zurück) und zeichnen.
   canvas.width = width;
@@ -151,19 +193,23 @@ async function renderLabel(qrUrl: string, lines: Line[], maxLengthMm: number): P
 
 // 🏷️ Item-Etikett: QR -> /item/{id}, daneben Name + Tags. Bewusst kompakt –
 // ohne Lagerort-Code und ohne Eigentümer (steht alles in der App hinterm QR).
+// withText=false druckt nur den QR-Code (minimales Tape).
 export async function renderLabelToPng(
   item: LabelItem,
   _ownerName: string,
   origin: string,
-  maxLengthMm: number = DEFAULT_LABEL_LENGTH_MM
+  maxLengthMm: number = DEFAULT_LABEL_LENGTH_MM,
+  withText: boolean = true
 ): Promise<string> {
   const tagLine = (item.tags || []).slice(0, 3).join(' · ');
   return renderLabel(
     buildItemLabelUrl(origin, item.id),
-    [
-      { text: (item.name || 'Item').toUpperCase(), kind: 'title' },
-      { text: tagLine, kind: 'small' },
-    ],
+    withText
+      ? [
+          { text: (item.name || 'Item').toUpperCase(), kind: 'title' },
+          { text: tagLine, kind: 'small' },
+        ]
+      : [],
     maxLengthMm
   );
 }
@@ -173,20 +219,24 @@ export async function renderLocationLabelToPng(
   loc: LabelLocation,
   _ownerName: string,
   origin: string,
-  maxLengthMm: number = DEFAULT_LABEL_LENGTH_MM
+  maxLengthMm: number = DEFAULT_LABEL_LENGTH_MM,
+  withText: boolean = true
 ): Promise<string> {
   return renderLabel(
     buildLocationLabelUrl(origin, loc.id),
-    [
-      { text: (loc.name || 'Lagerort').toUpperCase(), kind: 'title' },
-      { text: loc.code || '', kind: 'mono' },
-    ],
+    withText
+      ? [
+          { text: (loc.name || 'Lagerort').toUpperCase(), kind: 'title' },
+          { text: loc.code || '', kind: 'mono' },
+        ]
+      : [],
     maxLengthMm
   );
 }
 
-// 🤝 Verleih-Etikett: hier gehören Eigentümer, Ausleiher und Rückgabedatum
-// drauf – darf dafür länger ausfallen (eigenes, großzügigeres Maximum).
+// 🤝 Verleih-Etikett: hier gehören Eigentümer, Ausleiher und die Daten drauf –
+// der Text ist der Zweck dieses Etiketts, daher immer mit Text. Der Titel
+// bleibt einzeilig, damit die Infozeilen Platz haben.
 export async function renderLoanLabelToPng(
   item: LabelItem,
   loan: LabelLoan,
@@ -194,16 +244,19 @@ export async function renderLoanLabelToPng(
   origin: string,
   maxLengthMm: number = 90
 ): Promise<string> {
-  const returnDate = loan.expectedReturnDate
-    ? new Date(loan.expectedReturnDate).toLocaleDateString('de-CH')
-    : '';
+  const fmt = (d?: string | null) => (d ? new Date(d).toLocaleDateString('de-CH') : '');
+  const since = fmt(loan.borrowDate);
+  const back = fmt(loan.expectedReturnDate);
+  const dateLine = [since ? `Seit: ${since}` : '', back ? `Zurück: ${back}` : ''].filter(Boolean).join(' · ');
   return renderLabel(
     buildItemLabelUrl(origin, item.id),
     [
       { text: (item.name || 'Item').toUpperCase(), kind: 'title' },
       { text: `Eigentum: ${ownerName || 'ShedSync'}`, kind: 'small' },
-      { text: `An: ${loan.borrowerName || '?'}${loan.quantity && loan.quantity > 1 ? ` (${loan.quantity}x)` : ''}${returnDate ? ` · Zurück: ${returnDate}` : ''}`, kind: 'small' },
+      { text: `An: ${loan.borrowerName || '?'}${loan.quantity && loan.quantity > 1 ? ` (${loan.quantity}x)` : ''}`, kind: 'small' },
+      { text: dateLine, kind: 'small' },
     ],
-    maxLengthMm
+    maxLengthMm,
+    1
   );
 }

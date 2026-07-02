@@ -121,7 +121,8 @@ export default function SettingsPage() {
     try {
       await setDoc(doc(db, 'workspaces', workspaceId!, 'settings', 'main'), {
         ownerName,
-        brotherPrinter,
+        // Firestore akzeptiert kein undefined -> leere Länge als Default speichern
+        brotherPrinter: { ...brotherPrinter, labelLengthMm: brotherPrinter.labelLengthMm || 60 },
         preferredShops,
         customShops,
         categories: updatedCategories
@@ -341,17 +342,33 @@ export default function SettingsPage() {
               />
             </div>
             <div>
-              <label className="block text-xs font-semibold text-slate-500 mb-1">Etikettenlänge (mm)</label>
+              <label className="block text-xs font-semibold text-slate-500 mb-1">Max. Etikettenlänge (mm)</label>
               <input
                 type="number"
                 min={30}
                 max={200}
-                value={brotherPrinter.labelLengthMm || 60}
-                onChange={(e) => setBrotherPrinter({ ...brotherPrinter, labelLengthMm: Number(e.target.value) || 60 })}
+                placeholder="60"
+                value={brotherPrinter.labelLengthMm ?? ''}
+                onChange={(e) => setBrotherPrinter({
+                  ...brotherPrinter,
+                  labelLengthMm: e.target.value === '' ? undefined : Number(e.target.value),
+                })}
                 className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none font-mono text-sm text-slate-800 focus:border-orange-500"
               />
+              <p className="text-[9px] text-slate-400 mt-1">Obergrenze – das Etikett wird nur so lang wie der Inhalt.</p>
             </div>
           </div>
+
+          <label className="mt-4 flex items-center gap-3 bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={brotherPrinter.textOnLabel !== false}
+              onChange={(e) => setBrotherPrinter({ ...brotherPrinter, textOnLabel: e.target.checked })}
+              className="w-4 h-4 rounded text-orange-500"
+            />
+            <span className="text-sm font-bold text-slate-700">Text auf Etiketten drucken</span>
+            <span className="text-[10px] text-slate-400">(aus = nur QR-Code, minimales Tape · Verleih-Etiketten haben immer Text)</span>
+          </label>
 
           <button
             type="button"

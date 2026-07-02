@@ -3,22 +3,28 @@
 // Wichtig für den PT-P710BT (Thermodruck, 180 dpi):
 // - Auf 24-mm-Tape sind exakt 128 Druckpunkte Höhe verfügbar. Wir rendern
 //   GENAU in dieser Auflösung, damit das SDK nicht skaliert (keine Unschärfe).
-// - Feste Etikettenlänge (mm, konfigurierbar), damit das Tape nicht endlos läuft.
+// - Die Etikettenlänge passt sich dem Inhalt an (so kurz wie möglich);
+//   die konfigurierte Länge (Settings) wirkt als Obergrenze.
 // - QR mit Ruhezone (weißer Rand) und ganzzahligen Modul-Pixeln -> scannbar.
-// - Am Ende ein harter Schwarz/Weiß-Threshold: Thermodrucker können kein Grau,
-//   Antialiasing-Kanten würden sonst zu Pixelmatsch gerastert.
+// - Am Ende ein harter Schwarz/Weiß-Threshold: Thermodrucker können kein Grau.
 import QRCode from 'qrcode';
 
 export type LabelItem = {
   id: string;
   name?: string;
-  locationCode?: string; // Kürzel des Lagerorts, z.B. "LOC-A4F2"
+  tags?: string[];
 };
 
 export type LabelLocation = {
   id: string;
   name?: string;
   code?: string;
+};
+
+export type LabelLoan = {
+  borrowerName?: string;
+  quantity?: number;
+  expectedReturnDate?: string | null;
 };
 
 const DPI = 180;
@@ -58,6 +64,9 @@ async function renderQr(url: string, maxSize: number): Promise<HTMLImageElement>
   return loadImage(dataUrl);
 }
 
+type Line = { text: string; kind: 'title' | 'mono' | 'small' };
+type FittedLine = { text: string; font: string; h: number };
+
 // Text einpassen: Font verkleinern bis er passt, sonst mit „…" kürzen.
 function fitText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number, startPx: number, minPx: number, weight: string, family: string): { text: string; font: string } {
   let size = startPx;
@@ -70,6 +79,16 @@ function fitText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number, 
   let t = text;
   while (t.length > 1 && ctx.measureText(t + '…').width > maxWidth) t = t.slice(0, -1);
   return { text: t + (t !== text ? '…' : ''), font: ctx.font };
+}
+
+function fitLines(ctx: CanvasRenderingContext2D, lines: Line[], maxTextWidth: number): FittedLine[] {
+  return lines
+    .filter(l => l.text.trim() !== '')
+    .map(l => {
+      if (l.kind === 'title') return { ...fitText(ctx, l.text, maxTextWidth, 34, 18, 'bold', 'Arial, sans-serif'), h: 38 };
+      if (l.kind === 'mono') return { ...fitText(ctx, l.text, maxTextWidth, 22, 14, 'bold', 'monospace'), h: 26 };
+      return { ...fitText(ctx, l.text, maxTextWidth, 18, 12, 'normal', 'Arial, sans-serif'), h: 22 };
+    });
 }
 
 // Alles unter dieser Helligkeit wird schwarz, der Rest weiß.
@@ -85,44 +104,39 @@ function applyThreshold(ctx: CanvasRenderingContext2D, width: number, height: nu
   ctx.putImageData(imageData, 0, 0);
 }
 
-async function renderLabel(
-  qrUrl: string,
-  lines: { text: string; kind: 'title' | 'mono' | 'small' }[],
-  lengthMm: number
-): Promise<string> {
-  const width = Math.max(mmToPx(lengthMm), LABEL_HEIGHT + 40);
+async function renderLabel(qrUrl: string, lines: Line[], maxLengthMm: number): Promise<string> {
   const height = LABEL_HEIGHT;
+  const maxWidth = Math.max(mmToPx(maxLengthMm), height + 40);
 
   const canvas = document.createElement('canvas');
-  canvas.width = width;
-  canvas.height = height;
   const ctx = canvas.getContext('2d');
   if (!ctx) throw new Error('Canvas 2D-Kontext nicht verfügbar');
 
+  const qrImg = await renderQr(qrUrl, height - 4);
+  const qrX = 2;
+  const textX = qrX + qrImg.width + 8;
+
+  // Phase 1: Zeilen gegen die maximal verfügbare Breite einpassen und messen.
+  const fitted = fitLines(ctx, lines, maxWidth - textX - 6);
+  let actualTextWidth = 0;
+  for (const line of fitted) {
+    ctx.font = line.font;
+    actualTextWidth = Math.max(actualTextWidth, ctx.measureText(line.text).width);
+  }
+
+  // Etikett nur so lang wie nötig (Inhalt), gedeckelt durch das Maximum.
+  const width = Math.min(maxWidth, Math.ceil(textX + actualTextWidth + 8));
+
+  // Phase 2: Canvas final dimensionieren (setzt den Kontext zurück) und zeichnen.
+  canvas.width = width;
+  canvas.height = height;
   ctx.imageSmoothingEnabled = false;
   ctx.fillStyle = '#ffffff';
   ctx.fillRect(0, 0, width, height);
+  ctx.drawImage(qrImg, qrX, Math.round((height - qrImg.height) / 2));
 
-  // QR links, pixelgenau positioniert.
-  const qrImg = await renderQr(qrUrl, height - 4);
-  const qrX = 2;
-  const qrY = Math.round((height - qrImg.height) / 2);
-  ctx.drawImage(qrImg, qrX, qrY);
-
-  // Textblock rechts vom QR.
-  const textX = qrX + qrImg.width + 8;
-  const maxTextWidth = width - textX - 6;
   ctx.fillStyle = '#000000';
   ctx.textBaseline = 'middle';
-
-  const fitted = lines
-    .filter(l => l.text.trim() !== '')
-    .map(l => {
-      if (l.kind === 'title') return { ...fitText(ctx, l.text, maxTextWidth, 34, 18, 'bold', 'Arial, sans-serif'), h: 38 };
-      if (l.kind === 'mono') return { ...fitText(ctx, l.text, maxTextWidth, 22, 14, 'bold', 'monospace'), h: 26 };
-      return { ...fitText(ctx, l.text, maxTextWidth, 18, 12, 'normal', 'Arial, sans-serif'), h: 22 };
-    });
-
   const totalH = fitted.reduce((s, l) => s + l.h, 0);
   let y = Math.round((height - totalH) / 2);
   for (const line of fitted) {
@@ -135,38 +149,61 @@ async function renderLabel(
   return canvas.toDataURL('image/png').split(',')[1];
 }
 
-// 🏷️ Item-Etikett: QR -> /item/{id}, daneben Name, Lagerort-Code, Eigentümer.
+// 🏷️ Item-Etikett: QR -> /item/{id}, daneben Name + Tags. Bewusst kompakt –
+// ohne Lagerort-Code und ohne Eigentümer (steht alles in der App hinterm QR).
 export async function renderLabelToPng(
   item: LabelItem,
-  ownerName: string,
+  _ownerName: string,
   origin: string,
-  lengthMm: number = DEFAULT_LABEL_LENGTH_MM
+  maxLengthMm: number = DEFAULT_LABEL_LENGTH_MM
 ): Promise<string> {
+  const tagLine = (item.tags || []).slice(0, 3).join(' · ');
   return renderLabel(
     buildItemLabelUrl(origin, item.id),
     [
       { text: (item.name || 'Item').toUpperCase(), kind: 'title' },
-      { text: item.locationCode || '', kind: 'mono' },
-      { text: ownerName || '', kind: 'small' },
+      { text: tagLine, kind: 'small' },
     ],
-    lengthMm
+    maxLengthMm
   );
 }
 
-// 📍 Lagerort-Etikett: QR -> /locations/{id}, daneben Name + Code.
+// 📍 Lagerort-Etikett: QR -> /locations/{id}, daneben Name (+ Code, falls gesetzt).
 export async function renderLocationLabelToPng(
   loc: LabelLocation,
-  ownerName: string,
+  _ownerName: string,
   origin: string,
-  lengthMm: number = DEFAULT_LABEL_LENGTH_MM
+  maxLengthMm: number = DEFAULT_LABEL_LENGTH_MM
 ): Promise<string> {
   return renderLabel(
     buildLocationLabelUrl(origin, loc.id),
     [
       { text: (loc.name || 'Lagerort').toUpperCase(), kind: 'title' },
       { text: loc.code || '', kind: 'mono' },
-      { text: ownerName || '', kind: 'small' },
     ],
-    lengthMm
+    maxLengthMm
+  );
+}
+
+// 🤝 Verleih-Etikett: hier gehören Eigentümer, Ausleiher und Rückgabedatum
+// drauf – darf dafür länger ausfallen (eigenes, großzügigeres Maximum).
+export async function renderLoanLabelToPng(
+  item: LabelItem,
+  loan: LabelLoan,
+  ownerName: string,
+  origin: string,
+  maxLengthMm: number = 90
+): Promise<string> {
+  const returnDate = loan.expectedReturnDate
+    ? new Date(loan.expectedReturnDate).toLocaleDateString('de-CH')
+    : '';
+  return renderLabel(
+    buildItemLabelUrl(origin, item.id),
+    [
+      { text: (item.name || 'Item').toUpperCase(), kind: 'title' },
+      { text: `Eigentum: ${ownerName || 'ShedSync'}`, kind: 'small' },
+      { text: `An: ${loan.borrowerName || '?'}${loan.quantity && loan.quantity > 1 ? ` (${loan.quantity}x)` : ''}${returnDate ? ` · Zurück: ${returnDate}` : ''}`, kind: 'small' },
+    ],
+    maxLengthMm
   );
 }

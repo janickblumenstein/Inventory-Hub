@@ -6,8 +6,9 @@ import { doc, getDoc, updateDoc, deleteDoc, collection, getDocs } from 'firebase
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import type { CategoryConfig } from '../../../settings/page'; 
+import type { CategoryConfig } from '../../../settings/page';
 import { useWorkspace } from '../../../../context/WorkspaceContext';
+import { STOCK_LEVELS, STOCK_LEVEL_ORDER, type StockMode, type StockLevel } from '../../../../lib/stock';
 
 // 🛒 DAS SHOP-LEXIKON
 const SUPPORTED_SHOPS: Record<string, { name: string, style: string, urlPattern: string }> = {
@@ -31,6 +32,8 @@ export default function EditItem({ params }: { params: Promise<{ id: string }> }
   const [ean, setEan] = useState('');
   const [quantity, setQuantity] = useState(1);
   const [minQuantity, setMinQuantity] = useState('');
+  const [stockMode, setStockMode] = useState<StockMode>('count');
+  const [stockLevel, setStockLevel] = useState<StockLevel>('ok');
   const [locationId, setLocationId] = useState('');
   
   // 📸 BILD & URL DATEN (NEU)
@@ -95,6 +98,8 @@ export default function EditItem({ params }: { params: Promise<{ id: string }> }
             setEan(data.ean || '');
             setQuantity(data.quantity || 1);
             setMinQuantity(data.minQuantity != null ? String(data.minQuantity) : '');
+            setStockMode(data.stockMode === 'level' || data.stockMode === 'none' ? data.stockMode : 'count');
+            setStockLevel(STOCK_LEVEL_ORDER.includes(data.stockLevel) ? data.stockLevel : 'ok');
             setLocationId(data.locationId || '');
             setTagX(data.tagX ?? null);
             setTagY(data.tagY ?? null);
@@ -231,6 +236,8 @@ export default function EditItem({ params }: { params: Promise<{ id: string }> }
         tags: selectedTags,
         quantity,
         minQuantity: minQuantity === '' ? null : Number(minQuantity),
+        stockMode,
+        stockLevel,
         locationId,
         tagX,
         tagY,
@@ -502,8 +509,60 @@ export default function EditItem({ params }: { params: Promise<{ id: string }> }
               </div>
             )}
 
-            <div className="grid grid-cols-2 gap-4 pt-4 border-t border-slate-100 mt-4">
-              <div>
+            {/* 📊 BESTANDSFÜHRUNG: Zählen / Füllstand / Ohne */}
+            <div className="pt-4 border-t border-slate-100 mt-4">
+              <label className="block text-[10px] font-bold text-slate-500 uppercase mb-2">Bestandsführung</label>
+              <div className="grid grid-cols-3 gap-2 mb-4">
+                {([
+                  { mode: 'count' as StockMode, icon: '🔢', label: 'Menge zählen', hint: 'z.B. Werkzeug' },
+                  { mode: 'level' as StockMode, icon: '📊', label: 'Füllstand', hint: 'z.B. Schrauben' },
+                  { mode: 'none' as StockMode, icon: '🧰', label: 'Ohne Bestand', hint: 'z.B. Kiste mit Tags' },
+                ]).map(opt => (
+                  <button
+                    key={opt.mode}
+                    type="button"
+                    onClick={() => setStockMode(opt.mode)}
+                    className={`p-3 rounded-xl border flex flex-col items-center gap-1 transition-all ${
+                      stockMode === opt.mode
+                        ? 'bg-orange-50 border-orange-500 shadow-sm'
+                        : 'bg-white border-slate-200 opacity-70 hover:opacity-100'
+                    }`}
+                  >
+                    <span className="text-xl">{opt.icon}</span>
+                    <span className={`text-[10px] font-bold text-center leading-tight ${stockMode === opt.mode ? 'text-orange-900' : 'text-slate-600'}`}>{opt.label}</span>
+                    <span className="text-[8px] text-slate-400">{opt.hint}</span>
+                  </button>
+                ))}
+              </div>
+
+              {stockMode === 'level' && (
+                <div className="mb-4 animate-fade-in">
+                  <label className="block text-[10px] font-bold text-slate-500 uppercase mb-2">Aktueller Füllstand</label>
+                  <div className="grid grid-cols-4 gap-2">
+                    {STOCK_LEVEL_ORDER.map(level => {
+                      const cfg = STOCK_LEVELS[level];
+                      return (
+                        <button
+                          key={level}
+                          type="button"
+                          onClick={() => setStockLevel(level)}
+                          className={`py-2.5 rounded-xl border-2 font-bold text-xs transition flex flex-col items-center gap-0.5 ${
+                            stockLevel === level ? cfg.badge + ' shadow-inner' : 'bg-white text-slate-400 border-slate-200 hover:border-slate-300'
+                          }`}
+                        >
+                          <span>{cfg.emoji}</span>
+                          {cfg.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <p className="text-[9px] text-slate-400 mt-1.5">Bei „Knapp" oder „Leer" landet das Item automatisch auf der Einkaufsliste.</p>
+                </div>
+              )}
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className={stockMode !== 'count' ? 'hidden' : ''}>
                 <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Menge</label>
                 <input type="number" value={quantity} onChange={(e) => setQuantity(Number(e.target.value))} className="w-full p-3 border border-slate-300 rounded-xl bg-white text-slate-900 font-bold" />
                 <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1 mt-3">Mindestbestand (Optional)</label>

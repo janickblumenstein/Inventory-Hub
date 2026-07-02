@@ -13,9 +13,11 @@ import { Capacitor } from '@capacitor/core';
 import {
   renderLabelToPng,
   renderLocationLabelToPng,
+  renderLoanLabelToPng,
   DEFAULT_LABEL_LENGTH_MM,
   type LabelItem,
   type LabelLocation,
+  type LabelLoan,
 } from './labelImage';
 
 // Konfiguration des gekoppelten Druckers (in den Settings gespeichert).
@@ -163,6 +165,30 @@ export async function tryPrintNative(
       const encodedImage = await renderLabelToPng(item, ownerName, origin, lengthMm);
       await printImageAsync(plugin, encodedImage);
     }
+  } catch (e) {
+    console.error('Brother-Druck fehlgeschlagen:', e);
+    alert('❌ Druck fehlgeschlagen: ' + (e as Error).message + '\nIst der Drucker eingeschaltet und gekoppelt?');
+  }
+  return true;
+}
+
+// Druckt ein Verleih-Etikett nativ (mit Eigentümer, Ausleiher, Rückgabedatum).
+export async function tryPrintLoanNative(
+  item: LabelItem,
+  loan: LabelLoan,
+  ownerName: string,
+  cfg: BrotherPrinterConfig | null | undefined,
+  origin: string
+): Promise<boolean> {
+  if (!canPrintNative(cfg)) return false;
+  const plugin = getPlugin();
+  if (!plugin) return false;
+
+  try {
+    await requestBluetoothPermissions();
+    await setPrinterAsync(plugin, cfg, 1);
+    const encodedImage = await renderLoanLabelToPng(item, loan, ownerName, origin);
+    await printImageAsync(plugin, encodedImage);
   } catch (e) {
     console.error('Brother-Druck fehlgeschlagen:', e);
     alert('❌ Druck fehlgeschlagen: ' + (e as Error).message + '\nIst der Drucker eingeschaltet und gekoppelt?');

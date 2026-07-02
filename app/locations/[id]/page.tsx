@@ -10,6 +10,7 @@ import QRCode from 'react-qr-code';
 import { useWorkspace } from '../../../context/WorkspaceContext';
 import { tryPrintLocationsNative } from '../../../lib/brotherPrint';
 import { buildLocationLabelUrl } from '../../../lib/labelImage';
+import { getStockMode, getStockLevel, nextStockLevel, STOCK_LEVELS } from '../../../lib/stock';
 
 export default function LocationHub({ params }: { params: Promise<{ id: string }> }) {
   const router = useRouter();
@@ -41,6 +42,8 @@ export default function LocationHub({ params }: { params: Promise<{ id: string }
   const [showPhotoTagging, setShowPhotoTagging] = useState(false);
   const [pendingTag, setPendingTag] = useState<{ x: number; y: number } | null>(null);
   const [newItemName, setNewItemName] = useState('');
+  const [newItemQty, setNewItemQty] = useState(1);
+  const [newItemCategoryId, setNewItemCategoryId] = useState('');
   const [isCreatingItem, setIsCreatingItem] = useState(false);
   const [isUploadingPhoto, setIsUploadingPhoto] = useState(false);
 
@@ -194,8 +197,31 @@ export default function LocationHub({ params }: { params: Promise<{ id: string }
     setItemsInLocation(prev => prev.map(i => i.id === itemId ? { ...i, ...update } : i));
     try {
       await updateDoc(doc(db, 'workspaces', workspaceId, 'items', itemId), update);
+      // Bewegung loggen (Basis für den Ø-Verbrauch)
+      addDoc(collection(db, 'workspaces', workspaceId, 'items', itemId, 'movements'), {
+        delta,
+        at: new Date().toISOString(),
+      }).catch(() => {});
     } catch {
       alert('Fehler beim Speichern der Menge.');
+    }
+  };
+
+  // 🟢→🔵→🟠→🔴 Füllstand direkt in der Liste durchtippen
+  const cycleStockLevel = async (itemId: string, e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!workspaceId) return;
+    const item = itemsInLocation.find(i => i.id === itemId);
+    if (!item) return;
+    const level = nextStockLevel(getStockLevel(item));
+    const update: any = { stockLevel: level };
+    if ((level === 'low' || level === 'empty') && !item.onShoppingList) update.onShoppingList = true;
+    setItemsInLocation(prev => prev.map(i => i.id === itemId ? { ...i, ...update } : i));
+    try {
+      await updateDoc(doc(db, 'workspaces', workspaceId, 'items', itemId), update);
+    } catch {
+      alert('Fehler beim Speichern.');
     }
   };
 
@@ -221,22 +247,25 @@ export default function LocationHub({ params }: { params: Promise<{ id: string }
     setIsCreatingItem(true);
     try {
       const name = newItemName.trim() || 'Unbenannt';
-      const docRef = await addDoc(collection(db, 'workspaces', workspaceId, 'items'), {
+      // Kategorie direkt gewählt -> sauber einsortiert; sonst Eingangskorb.
+      const cat = categories.find((c: any) => c.id === newItemCategoryId);
+      // Entspricht der Name einem bekannten Tag, wird er gleich als Tag gesetzt.
+      const tags = allTags.includes(name) ? [name] : [];
+      const newItem = {
         name,
-        quantity: 1,
+        quantity: newItemQty,
         locationId: id,
-        category: '', // -> landet im Eingangskorb zum späteren Einsortieren
-        tags: [],
+        category: cat?.name || '',
+        tags,
         tagX: pendingTag.x,
         tagY: pendingTag.y,
         createdAt: new Date().toISOString()
-      });
-      setItemsInLocation(prev => [...prev, {
-        id: docRef.id, name, quantity: 1, locationId: id,
-        category: '', tags: [], tagX: pendingTag.x, tagY: pendingTag.y
-      }]);
+      };
+      const docRef = await addDoc(collection(db, 'workspaces', workspaceId, 'items'), newItem);
+      setItemsInLocation(prev => [...prev, { id: docRef.id, ...newItem }]);
       setPendingTag(null);
       setNewItemName('');
+      setNewItemQty(1); // Kategorie bewusst behalten (Serien-Erfassung)
     } catch (e) {
       alert('Fehler beim Erfassen des Items.');
     } finally {
@@ -422,21 +451,33 @@ export default function LocationHub({ params }: { params: Promise<{ id: string }
                               {item.category && <p className="text-[10px] text-slate-500 uppercase tracking-wider mt-0.5">{item.category}</p>}
                             </div>
                           </div>
-                          <div className="flex items-center gap-1">
+                          {getStockMode(item) === 'level' ? (
                             <button
-                              onClick={(e) => changeItemQuantity(item.id, -1, e)}
-                              className="w-7 h-7 flex items-center justify-center bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded-md text-slate-600 font-bold transition"
-                              title="Menge verringern"
-                            >−</button>
-                            <span className="bg-slate-100 text-slate-600 text-xs font-bold px-2.5 py-1 rounded-lg border border-slate-200 min-w-[38px] text-center">
-                              {item.quantity}x
-                            </span>
-                            <button
-                              onClick={(e) => changeItemQuantity(item.id, 1, e)}
-                              className="w-7 h-7 flex items-center justify-center bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded-md text-slate-600 font-bold transition"
-                              title="Menge erhöhen"
-                            >+</button>
-                          </div>
+                              onClick={(e) => cycleStockLevel(item.id, e)}
+                              className={`font-bold px-2.5 py-1 rounded-md border text-xs transition hover:scale-105 ${STOCK_LEVELS[getStockLevel(item)].badge}`}
+                              title="Antippen zum Weiterschalten"
+                            >
+                              {STOCK_LEVELS[getStockLevel(item)].emoji} {STOCK_LEVELS[getStockLevel(item)].label}
+                            </button>
+                          ) : getStockMode(item) === 'none' ? (
+                            <span className="text-lg opacity-40" title="Ohne Bestandsführung">🧰</span>
+                          ) : (
+                            <div className="flex items-center gap-1">
+                              <button
+                                onClick={(e) => changeItemQuantity(item.id, -1, e)}
+                                className="w-7 h-7 flex items-center justify-center bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded-md text-slate-600 font-bold transition"
+                                title="Menge verringern"
+                              >−</button>
+                              <span className="bg-slate-100 text-slate-600 text-xs font-bold px-2.5 py-1 rounded-lg border border-slate-200 min-w-[38px] text-center">
+                                {item.quantity}x
+                              </span>
+                              <button
+                                onClick={(e) => changeItemQuantity(item.id, 1, e)}
+                                className="w-7 h-7 flex items-center justify-center bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded-md text-slate-600 font-bold transition"
+                                title="Menge erhöhen"
+                              >+</button>
+                            </div>
+                          )}
                         </Link>
                       </li>
                     ))}
@@ -640,6 +681,33 @@ export default function LocationHub({ params }: { params: Promise<{ id: string }
                     <datalist id="phototag-suggestions">
                       {allTags.map(t => <option key={t} value={t} />)}
                     </datalist>
+
+                    {/* Kategorie (optional) + Menge direkt beim Erfassen */}
+                    <div className="flex items-center gap-2">
+                      <div className="flex-1 flex gap-1.5 overflow-x-auto pb-1">
+                        {categories.map((cat: any) => (
+                          <button
+                            key={cat.id}
+                            type="button"
+                            onClick={() => setNewItemCategoryId(newItemCategoryId === cat.id ? '' : cat.id)}
+                            className={`shrink-0 px-2 py-1.5 rounded-lg border text-xs font-bold transition flex items-center gap-1 ${
+                              newItemCategoryId === cat.id
+                                ? 'bg-orange-50 border-orange-500 text-orange-900'
+                                : 'bg-white border-slate-200 text-slate-500 hover:bg-slate-50'
+                            }`}
+                          >
+                            <span>{cat.icon}</span>
+                            <span className="max-w-[80px] truncate">{cat.name}</span>
+                          </button>
+                        ))}
+                      </div>
+                      <div className="flex items-center gap-1 shrink-0">
+                        <button type="button" onClick={() => setNewItemQty(Math.max(1, newItemQty - 1))} className="w-8 h-8 flex items-center justify-center bg-slate-100 border border-slate-200 rounded-md text-slate-600 font-bold">−</button>
+                        <span className="w-8 text-center font-bold text-slate-800 text-sm">{newItemQty}</span>
+                        <button type="button" onClick={() => setNewItemQty(newItemQty + 1)} className="w-8 h-8 flex items-center justify-center bg-slate-100 border border-slate-200 rounded-md text-slate-600 font-bold">+</button>
+                      </div>
+                    </div>
+
                     <div className="flex gap-2">
                       <button onClick={createTaggedItem} disabled={isCreatingItem} className="flex-1 bg-slate-900 text-white font-bold py-3 rounded-xl hover:bg-slate-800 transition disabled:opacity-50">
                         {isCreatingItem ? 'Speichert…' : '✓ Erfassen'}
@@ -648,7 +716,9 @@ export default function LocationHub({ params }: { params: Promise<{ id: string }
                         Abbrechen
                       </button>
                     </div>
-                    <p className="text-[10px] text-slate-400 text-center">Landet im Eingangskorb – später einsortieren.</p>
+                    <p className="text-[10px] text-slate-400 text-center">
+                      {newItemCategoryId ? 'Wird direkt einsortiert.' : 'Ohne Kategorie: landet im Eingangskorb.'}
+                    </p>
                   </div>
                 ) : (
                   <div className="text-center">

@@ -6,7 +6,8 @@ import { doc, getDoc, updateDoc, collection, addDoc, query, where, getDocs } fro
 import Link from 'next/link';
 import QRCode from 'react-qr-code';
 import { useWorkspace } from '../../../context/WorkspaceContext';
-import { tryPrintNative } from '../../../lib/brotherPrint';
+import { tryPrintNative, tryPrintLoanNative } from '../../../lib/brotherPrint';
+import { getStockMode, getStockLevel, STOCK_LEVELS, STOCK_LEVEL_ORDER, type StockLevel } from '../../../lib/stock';
 
 // 🛒 DAS SHOP-LEXIKON FÜR DIE SCHNELLSUCHE
 const SUPPORTED_SHOPS: Record<string, { name: string, style: string, urlPattern: string }> = {
@@ -45,6 +46,9 @@ export default function ItemDetail({ params }: { params: Promise<{ id: string }>
   const [loading, setLoading] = useState(true);
   const [isUpdating, setIsUpdating] = useState(false);
 
+  // 📈 Ø-Verbrauch pro Monat, berechnet aus den Bestandsbewegungen (90 Tage)
+  const [monthlyUsage, setMonthlyUsage] = useState<number | null>(null);
+
   const fetchItemAndLoans = async () => {
     try {
       // 1. Item laden
@@ -67,6 +71,23 @@ export default function ItemDetail({ params }: { params: Promise<{ id: string }>
       const loansQuery = query(collection(db, 'workspaces', workspaceId!, 'loans'), where('itemId', '==', id), where('status', '==', 'active'));
       const loansSnap = await getDocs(loansQuery);
       setActiveLoans(loansSnap.docs.map(d => ({ id: d.id, ...d.data() })));
+
+      // 2b. Bewegungen der letzten 90 Tage -> Ø-Verbrauch/Monat (nur Abgänge)
+      try {
+        const movesSnap = await getDocs(collection(db, 'workspaces', workspaceId!, 'items', id, 'movements'));
+        const cutoff = Date.now() - 90 * 86400000;
+        const moves = movesSnap.docs
+          .map(d => d.data() as any)
+          .filter(m => m.at && new Date(m.at).getTime() >= cutoff);
+        const used = moves.reduce((sum, m) => sum + (m.delta < 0 ? -m.delta : 0), 0);
+        if (used > 0) {
+          const earliest = Math.min(...moves.map(m => new Date(m.at).getTime()));
+          const days = Math.max((Date.now() - earliest) / 86400000, 14);
+          setMonthlyUsage(Math.round((used / days) * 30 * 10) / 10);
+        } else {
+          setMonthlyUsage(null);
+        }
+      } catch { /* Verbrauchsanzeige ist optional */ }
 
       // 3. Settings & Shops laden
       const settingsSnap = await getDoc(doc(db, 'workspaces', workspaceId!, 'settings', 'main'));
@@ -130,7 +151,29 @@ export default function ItemDetail({ params }: { params: Promise<{ id: string }>
 
       await updateDoc(doc(db, 'workspaces', workspaceId, 'items', item.id), update);
       setItem({ ...item, ...update });
+
+      // Bewegung loggen (Basis für den Ø-Verbrauch); Fehler hier sind egal.
+      addDoc(collection(db, 'workspaces', workspaceId, 'items', item.id, 'movements'), {
+        delta: amount,
+        at: new Date().toISOString(),
+      }).catch(() => {});
     } catch (error) {
+      alert("Fehler beim Speichern.");
+    } finally {
+      setIsUpdating(false);
+    }
+  };
+
+  // 🟢🔵🟠🔴 Füllstand setzen (Modus 'level'); Knapp/Leer -> Einkaufsliste
+  const setStockLevelValue = async (level: StockLevel) => {
+    if (!item || !workspaceId) return;
+    setIsUpdating(true);
+    try {
+      const update: any = { stockLevel: level };
+      if ((level === 'low' || level === 'empty') && !item.onShoppingList) update.onShoppingList = true;
+      await updateDoc(doc(db, 'workspaces', workspaceId, 'items', item.id), update);
+      setItem({ ...item, ...update });
+    } catch {
       alert("Fehler beim Speichern.");
     } finally {
       setIsUpdating(false);
@@ -190,7 +233,17 @@ export default function ItemDetail({ params }: { params: Promise<{ id: string }>
     }
   };
 
-  const handlePrintLoan = (loan: any) => {
+  // 🤝 Verleih-Etikett: nativ per Bluetooth (mit Eigentümer, Ausleiher,
+  // Rückgabedatum), sonst Browser-Druck.
+  const handlePrintLoan = async (loan: any) => {
+    const handled = await tryPrintLoanNative(
+      { id: item.id, name: item.name },
+      { borrowerName: loan.borrowerName, quantity: loan.quantity, expectedReturnDate: loan.expectedReturnDate },
+      ownerName,
+      brotherPrinter,
+      window.location.origin
+    );
+    if (handled) return;
     setPrintLoan(loan);
     setTimeout(() => { window.print(); }, 200);
   };
@@ -200,7 +253,7 @@ export default function ItemDetail({ params }: { params: Promise<{ id: string }>
   // Sonst (PC/iPhone-Browser): window.print()-Fallback.
   const handlePrintLabel = async () => {
     const handled = await tryPrintNative(
-      [{ id: item.id, name: item.name, locationCode: location?.code }],
+      [{ id: item.id, name: item.name, tags: item.tags }],
       ownerName,
       brotherPrinter,
       window.location.origin
@@ -323,26 +376,62 @@ export default function ItemDetail({ params }: { params: Promise<{ id: string }>
               </div>
             </div>
 
-            <div className="bg-slate-50 border border-slate-200 rounded-xl p-5 flex flex-col sm:flex-row items-center justify-between gap-4 mb-6">
-              <div>
-                <p className="text-sm font-bold text-slate-500 uppercase tracking-wider mb-1">Inventar</p>
-                <div className="flex items-baseline gap-2">
-                  <span className="text-3xl font-black text-slate-800">{availableQty}</span>
-                  <span className="text-sm font-medium text-slate-500">von {totalQty} im Regal</span>
+            {getStockMode(item) === 'none' ? (
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 mb-6 flex items-center gap-3">
+                <span className="text-2xl">🧰</span>
+                <p className="text-sm font-medium text-slate-500">Ohne Bestandsführung – der Inhalt ist über die Tags beschrieben.</p>
+              </div>
+            ) : getStockMode(item) === 'level' ? (
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-5 mb-6">
+                <p className="text-sm font-bold text-slate-500 uppercase tracking-wider mb-3">Füllstand</p>
+                <div className="grid grid-cols-4 gap-2">
+                  {STOCK_LEVEL_ORDER.map(level => {
+                    const cfg = STOCK_LEVELS[level];
+                    const isActive = getStockLevel(item) === level;
+                    return (
+                      <button
+                        key={level}
+                        onClick={() => setStockLevelValue(level)}
+                        disabled={isUpdating}
+                        className={`py-3 rounded-xl border-2 font-bold text-xs transition flex flex-col items-center gap-1 ${
+                          isActive ? cfg.badge + ' shadow-inner scale-[1.03]' : 'bg-white text-slate-400 border-slate-200 hover:border-slate-300'
+                        }`}
+                      >
+                        <span className="text-lg">{cfg.emoji}</span>
+                        {cfg.label}
+                      </button>
+                    );
+                  })}
                 </div>
-                {item.minQuantity != null && (
-                  <p className={`text-[11px] font-bold mt-1 ${totalQty <= Number(item.minQuantity) ? 'text-red-600' : 'text-slate-400'}`}>
-                    {totalQty <= Number(item.minQuantity) ? '⚠️ Unter Mindestbestand' : 'Mindestbestand'}: {item.minQuantity}
-                  </p>
+                {(getStockLevel(item) === 'low' || getStockLevel(item) === 'empty') && (
+                  <p className="text-[11px] font-bold text-red-600 mt-3">⚠️ Nachschub nötig – steht auf der Einkaufsliste.</p>
                 )}
               </div>
-              
-              <div className="flex items-center gap-4 bg-white p-1.5 rounded-lg border border-slate-200 shadow-sm">
-                <button onClick={() => changeQuantity(-1)} disabled={isUpdating || totalQty <= 0} className="w-10 h-10 flex items-center justify-center bg-slate-50 hover:bg-slate-100 text-slate-600 text-xl font-bold rounded-md transition disabled:opacity-50">-</button>
-                <div className="w-12 text-center font-bold text-slate-800">{totalQty}</div>
-                <button onClick={() => changeQuantity(1)} disabled={isUpdating} className="w-10 h-10 flex items-center justify-center bg-slate-50 hover:bg-slate-100 text-slate-600 text-xl font-bold rounded-md transition disabled:opacity-50">+</button>
+            ) : (
+              <div className="bg-slate-50 border border-slate-200 rounded-xl p-5 flex flex-col sm:flex-row items-center justify-between gap-4 mb-6">
+                <div>
+                  <p className="text-sm font-bold text-slate-500 uppercase tracking-wider mb-1">Inventar</p>
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-3xl font-black text-slate-800">{availableQty}</span>
+                    <span className="text-sm font-medium text-slate-500">von {totalQty} im Regal</span>
+                  </div>
+                  {item.minQuantity != null && (
+                    <p className={`text-[11px] font-bold mt-1 ${totalQty <= Number(item.minQuantity) ? 'text-red-600' : 'text-slate-400'}`}>
+                      {totalQty <= Number(item.minQuantity) ? '⚠️ Unter Mindestbestand' : 'Mindestbestand'}: {item.minQuantity}
+                    </p>
+                  )}
+                  {monthlyUsage != null && (
+                    <p className="text-[11px] font-bold text-slate-400 mt-1">📈 Ø Verbrauch: ~{monthlyUsage} / Monat</p>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-4 bg-white p-1.5 rounded-lg border border-slate-200 shadow-sm">
+                  <button onClick={() => changeQuantity(-1)} disabled={isUpdating || totalQty <= 0} className="w-10 h-10 flex items-center justify-center bg-slate-50 hover:bg-slate-100 text-slate-600 text-xl font-bold rounded-md transition disabled:opacity-50">-</button>
+                  <div className="w-12 text-center font-bold text-slate-800">{totalQty}</div>
+                  <button onClick={() => changeQuantity(1)} disabled={isUpdating} className="w-10 h-10 flex items-center justify-center bg-slate-50 hover:bg-slate-100 text-slate-600 text-xl font-bold rounded-md transition disabled:opacity-50">+</button>
+                </div>
               </div>
-            </div>
+            )}
 
             {isLendable && (
               <div className="mb-8 border border-blue-100 rounded-xl overflow-hidden shadow-sm">

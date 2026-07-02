@@ -2,12 +2,13 @@
 
 import { useEffect, useState, useMemo } from 'react';
 import { db } from '../lib/firebase';
-import { collection, getDocs, orderBy, query, writeBatch, doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
+import { collection, getDocs, orderBy, query, writeBatch, doc, getDoc, setDoc, updateDoc, addDoc } from 'firebase/firestore';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import QRCode from 'react-qr-code';
 import { useWorkspace } from '../context/WorkspaceContext';
 import { tryPrintNative } from '../lib/brotherPrint';
+import { getStockMode, getStockLevel, nextStockLevel, isLowStock, STOCK_LEVELS } from '../lib/stock';
 
 // Such-URLs der Standard-Shops (für den Schnell-Link in der Einkaufsliste)
 const SHOP_SEARCH_URLS: Record<string, string> = {
@@ -266,11 +267,7 @@ export default function Dashboard() {
     if (selected.length === 0) return;
 
     const handled = await tryPrintNative(
-      selected.map(i => ({
-        id: i.id,
-        name: i.name,
-        locationCode: locations.find(l => l.id === i.locationId)?.code,
-      })),
+      selected.map(i => ({ id: i.id, name: i.name, tags: i.tags })),
       ownerName,
       brotherPrinter,
       window.location.origin
@@ -317,16 +314,40 @@ export default function Dashboard() {
       const update: any = { quantity: newQty };
       if (hitsMinimum) update.onShoppingList = true;
       await updateDoc(doc(db, 'workspaces', workspaceId, 'items', itemId), update);
+      // Bewegung loggen (Basis für den Ø-Verbrauch)
+      addDoc(collection(db, 'workspaces', workspaceId, 'items', itemId, 'movements'), {
+        delta,
+        at: new Date().toISOString(),
+      }).catch(() => {});
     } catch {
       alert('Fehler beim Speichern der Menge.');
     }
   };
 
-  // ⚠️ Items unter Mindestbestand, die noch nicht auf der Einkaufsliste sind
+  // ⚠️ Items mit Nachschubbedarf (Zähl- oder Füllstand-Modus), die noch
+  // nicht auf der Einkaufsliste stehen
   const lowStockItems = useMemo(
-    () => items.filter(i => i.minQuantity != null && (Number(i.quantity) || 0) <= Number(i.minQuantity) && !i.onShoppingList),
+    () => items.filter(i => isLowStock(i) && !i.onShoppingList),
     [items]
   );
+
+  // 🟢→🔵→🟠→🔴 Füllstand direkt in der Liste durchtippen
+  const cycleStockLevel = async (itemId: string, e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (!workspaceId) return;
+    const item = items.find(i => i.id === itemId);
+    if (!item) return;
+    const level = nextStockLevel(getStockLevel(item));
+    const update: any = { stockLevel: level };
+    if ((level === 'low' || level === 'empty') && !item.onShoppingList) update.onShoppingList = true;
+    setItems(prev => prev.map(i => i.id === itemId ? { ...i, ...update } : i));
+    try {
+      await updateDoc(doc(db, 'workspaces', workspaceId, 'items', itemId), update);
+    } catch {
+      alert('Fehler beim Speichern.');
+    }
+  };
 
   const handleAddLowStockToShopping = async () => {
     if (!workspaceId || lowStockItems.length === 0) return;
@@ -435,12 +456,13 @@ export default function Dashboard() {
               <svg className="w-6 h-6 sm:w-8 sm:h-8 text-orange-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
                 <path strokeLinecap="round" strokeLinejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4" />
               </svg>
-              <span className="text-orange-500 ml-1">Shed</span>
-              <span className="text-white">Sync</span>
+              {/* Logo-Text auf sehr schmalen Screens ausblenden, damit er nicht mit dem Menü kollidiert */}
+              <span className="text-orange-500 ml-1 max-[430px]:hidden">Shed</span>
+              <span className="text-white max-[430px]:hidden">Sync</span>
             </h1>
           </div>
-          
-          <div className="flex gap-1.5 sm:gap-2 items-center shrink-0">
+
+          <div className="flex gap-1 sm:gap-2 items-center shrink-0">
             <button 
               onClick={() => { 
                 setIsSelectionMode(!isSelectionMode); 
@@ -456,14 +478,14 @@ export default function Dashboard() {
             
             {!isSelectionMode && (
               <>
-                <Link href="/purchases" className="p-2 sm:p-2.5 bg-slate-800 hover:bg-slate-700 rounded-lg text-lg transition" title="Käufe & Garantie">🧾</Link>
-                <Link href="/loans" className="p-2 sm:p-2.5 bg-slate-800 hover:bg-slate-700 rounded-lg text-lg transition" title="Verleih">🤝</Link>
-                <Link href="/locations" className="p-2 sm:p-2.5 bg-slate-800 hover:bg-slate-700 rounded-lg text-lg transition" title="Lagerorte">🏗️</Link>
-                <Link href="/scanner" className="p-2 sm:p-2.5 bg-slate-800 hover:bg-slate-700 rounded-lg text-lg transition" title="Scanner">📷</Link>
-                <Link href="/new" className="bg-orange-600 hover:bg-orange-700 text-white font-bold p-2 sm:px-3 rounded-lg transition shadow-sm flex items-center justify-center">
+                <Link href="/purchases" className="p-1.5 sm:p-2.5 bg-slate-800 hover:bg-slate-700 rounded-lg text-base sm:text-lg transition" title="Käufe & Garantie">🧾</Link>
+                <Link href="/loans" className="p-1.5 sm:p-2.5 bg-slate-800 hover:bg-slate-700 rounded-lg text-base sm:text-lg transition" title="Verleih">🤝</Link>
+                <Link href="/locations" className="p-1.5 sm:p-2.5 bg-slate-800 hover:bg-slate-700 rounded-lg text-base sm:text-lg transition" title="Lagerorte">🏗️</Link>
+                <Link href="/scanner" className="p-1.5 sm:p-2.5 bg-slate-800 hover:bg-slate-700 rounded-lg text-base sm:text-lg transition" title="Scanner">📷</Link>
+                <Link href="/new" className="bg-orange-600 hover:bg-orange-700 text-white font-bold p-1.5 sm:px-3 rounded-lg transition shadow-sm flex items-center justify-center">
                   <span className="text-xl leading-none">+</span>
                 </Link>
-                <Link href="/settings" className="p-2 sm:p-2.5 bg-slate-800 hover:bg-slate-700 rounded-lg text-lg transition" title="Einstellungen">⚙️</Link>
+                <Link href="/settings" className="p-1.5 sm:p-2.5 bg-slate-800 hover:bg-slate-700 rounded-lg text-base sm:text-lg transition" title="Einstellungen">⚙️</Link>
               </>
             )}
           </div>
@@ -662,10 +684,31 @@ export default function Dashboard() {
                             <div className="flex-1 min-w-0">
                               <h3 className={`font-bold truncate transition flex items-center gap-2 ${isSelected ? 'text-orange-900' : 'text-slate-900 group-hover:text-orange-700'}`}>
                                 {item.name || 'Unbenanntes Item'}
-                                {item.minQuantity != null && (Number(item.quantity) || 0) <= Number(item.minQuantity) && (
+                                {isLowStock(item) && (
                                   <span className="text-[9px] bg-red-100 text-red-700 px-1.5 py-0.5 rounded font-bold border border-red-200 shrink-0">⚠️ Nachschub</span>
                                 )}
                               </h3>
+
+                              {/* 🏷️ Tags als antippbare Filter-Chips */}
+                              {item.tags && item.tags.length > 0 && (
+                                <div className="flex flex-wrap gap-1 mt-1">
+                                  {item.tags.slice(0, 4).map((tag: string) => (
+                                    <button
+                                      key={tag}
+                                      type="button"
+                                      onClick={(e) => { e.preventDefault(); e.stopPropagation(); toggleFilterTag(tag); }}
+                                      className={`text-[9px] font-bold px-1.5 py-0.5 rounded border transition ${
+                                        selectedFilterTags.includes(tag)
+                                          ? 'bg-orange-100 text-orange-800 border-orange-300'
+                                          : 'bg-slate-50 text-slate-500 border-slate-200 hover:bg-slate-100'
+                                      }`}
+                                      title={`Nach "${tag}" filtern`}
+                                    >
+                                      {tag}
+                                    </button>
+                                  ))}
+                                </div>
+                              )}
                               
                               {item.ean && <p className="text-[10px] text-slate-500 font-mono mt-0.5">EAN: {item.ean}</p>}
 
@@ -711,7 +754,17 @@ export default function Dashboard() {
                                 </button>
                               )}
 
-                              {activeTab === 'shopping' && !isSelectionMode ? (
+                              {getStockMode(item) === 'level' ? (
+                                <button
+                                  onClick={(e) => !isSelectionMode && cycleStockLevel(item.id, e)}
+                                  className={`font-bold px-2.5 py-1 rounded-md border text-xs transition ${STOCK_LEVELS[getStockLevel(item)].badge} ${!isSelectionMode ? 'hover:scale-105 cursor-pointer' : ''}`}
+                                  title="Antippen zum Weiterschalten (Voll → Ausreichend → Knapp → Leer)"
+                                >
+                                  {STOCK_LEVELS[getStockLevel(item)].emoji} {STOCK_LEVELS[getStockLevel(item)].label}
+                                </button>
+                              ) : getStockMode(item) === 'none' ? (
+                                <span className="text-lg opacity-40" title="Ohne Bestandsführung">🧰</span>
+                              ) : activeTab === 'shopping' && !isSelectionMode ? (
                                 <div className="flex items-center gap-1">
                                   <button
                                     onClick={(e) => changeItemQuantity(item.id, -1, e)}
@@ -872,10 +925,9 @@ export default function Dashboard() {
           <QRCode value={`${typeof window !== 'undefined' ? window.location.origin : ''}/item/${it.id}`} size={64} level="M" />
           <div className="text-left min-w-0">
             <p className="text-sm font-black uppercase tracking-tight text-black leading-tight break-words">{it.name || 'Item'}</p>
-            {locations.find(l => l.id === it.locationId)?.code && (
-              <p className="text-[9px] font-mono text-black mt-0.5">{locations.find(l => l.id === it.locationId)?.code}</p>
+            {it.tags && it.tags.length > 0 && (
+              <p className="text-[9px] text-black mt-0.5">{it.tags.slice(0, 3).join(' · ')}</p>
             )}
-            {ownerName && <p className="text-[9px] font-bold text-black mt-0.5">{ownerName}</p>}
           </div>
         </div>
       ))}

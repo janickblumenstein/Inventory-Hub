@@ -117,8 +117,13 @@ export default function ItemDetail({ params }: { params: Promise<{ id: string }>
 
     setIsUpdating(true);
     try {
-      await updateDoc(doc(db, 'workspaces', workspaceId, 'items', item.id), { quantity: newQty });
-      setItem({ ...item, quantity: newQty });
+      const update: any = { quantity: newQty };
+      // Mindestbestand unterschritten -> automatisch auf die Einkaufsliste
+      const hitsMinimum = item.minQuantity != null && newQty <= Number(item.minQuantity) && !item.onShoppingList;
+      if (hitsMinimum) update.onShoppingList = true;
+
+      await updateDoc(doc(db, 'workspaces', workspaceId, 'items', item.id), update);
+      setItem({ ...item, ...update });
     } catch (error) {
       alert("Fehler beim Speichern.");
     } finally {
@@ -319,6 +324,11 @@ export default function ItemDetail({ params }: { params: Promise<{ id: string }>
                   <span className="text-3xl font-black text-slate-800">{availableQty}</span>
                   <span className="text-sm font-medium text-slate-500">von {totalQty} im Regal</span>
                 </div>
+                {item.minQuantity != null && (
+                  <p className={`text-[11px] font-bold mt-1 ${totalQty <= Number(item.minQuantity) ? 'text-red-600' : 'text-slate-400'}`}>
+                    {totalQty <= Number(item.minQuantity) ? '⚠️ Unter Mindestbestand' : 'Mindestbestand'}: {item.minQuantity}
+                  </p>
+                )}
               </div>
               
               <div className="flex items-center gap-4 bg-white p-1.5 rounded-lg border border-slate-200 shadow-sm">
@@ -460,9 +470,17 @@ export default function ItemDetail({ params }: { params: Promise<{ id: string }>
 
             <div className="border-t border-slate-100 pt-6 mt-8">
               <h3 className="text-sm font-bold text-slate-500 uppercase tracking-wider mb-2">Lagerort</h3>
-              <p className="text-lg font-medium text-slate-800 mb-4">
-                📍 {location ? location.name : 'Nicht zugewiesen'}
-              </p>
+              {location ? (
+                <Link
+                  href={`/locations/${location.id}`}
+                  className="inline-flex items-center gap-2 text-lg font-medium text-slate-800 mb-4 hover:text-orange-700 transition group"
+                >
+                  📍 <span className="underline decoration-dotted underline-offset-4">{location.name}</span>
+                  <span className="text-sm text-orange-600 opacity-70 group-hover:opacity-100 transition">→ öffnen</span>
+                </Link>
+              ) : (
+                <p className="text-lg font-medium text-slate-800 mb-4">📍 Nicht zugewiesen</p>
+              )}
               
               {location && location.imageUrl && (
                 <div className="relative inline-block border-2 border-slate-200 rounded-lg overflow-hidden shadow-sm w-full">

@@ -108,6 +108,9 @@ export default function NewItem() {
 
   const activeCategory = categories.find(c => c.id === selectedCategoryId);
 
+  // Tag-Vorschläge aus ALLEN Kategorien (z.B. für Kisten mit gemischtem Inhalt)
+  const allKnownTags = Array.from(new Set(categories.flatMap(c => c.tags || []))).sort();
+
   // Tag Logik
   const toggleTag = (tag: string) => {
     if (!selectedTags.includes(tag)) {
@@ -461,8 +464,9 @@ export default function NewItem() {
                       ✓ {customTag}
                     </button>
                   ))}
-                  <input 
-                    type="text" 
+                  <input
+                    type="text"
+                    list="new-all-tags"
                     value={customTagInput}
                     onChange={(e) => setCustomTagInput(e.target.value)}
                     onKeyDown={handleAddCustomTag}
@@ -470,6 +474,9 @@ export default function NewItem() {
                     placeholder="+ Eigenes Tag"
                     className="px-3 py-1.5 rounded-lg text-xs font-bold border border-slate-300 bg-white text-slate-900 placeholder-slate-400 outline-none w-32 focus:border-orange-500"
                   />
+                  <datalist id="new-all-tags">
+                    {allKnownTags.map(t => <option key={t} value={t} />)}
+                  </datalist>
                 </div>
               </div>
             )}

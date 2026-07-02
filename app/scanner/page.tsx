@@ -152,11 +152,12 @@ export default function SuperScanner() {
             }
 
             // 2. ITEM BEREITS IN DEINER WERKSTATT?
+            // -> Detailseite (dort Menge per +/- anpassen), nicht das Formular.
             const itemQ = query(collection(db, 'workspaces', workspaceId, 'items'), where('ean', '==', decodedText));
             const querySnapshot = await getDocs(itemQ);
             if (!querySnapshot.empty) {
               scannerInstance.clear();
-              router.push(`/item/${querySnapshot.docs[0].id}/edit`); 
+              router.push(`/item/${querySnapshot.docs[0].id}`);
               return;
             }
 

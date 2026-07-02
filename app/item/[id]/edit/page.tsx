@@ -30,7 +30,8 @@ export default function EditItem({ params }: { params: Promise<{ id: string }> }
   const [name, setName] = useState('');
   const [ean, setEan] = useState('');
   const [quantity, setQuantity] = useState(1);
-  const [locationId, setLocationId] = useState(''); 
+  const [minQuantity, setMinQuantity] = useState('');
+  const [locationId, setLocationId] = useState('');
   
   // 📸 BILD & URL DATEN (NEU)
   const [imageUrl, setImageUrl] = useState('');
@@ -93,6 +94,7 @@ export default function EditItem({ params }: { params: Promise<{ id: string }> }
             setName(data.name || '');
             setEan(data.ean || '');
             setQuantity(data.quantity || 1);
+            setMinQuantity(data.minQuantity != null ? String(data.minQuantity) : '');
             setLocationId(data.locationId || '');
             setTagX(data.tagX ?? null);
             setTagY(data.tagY ?? null);
@@ -192,6 +194,9 @@ export default function EditItem({ params }: { params: Promise<{ id: string }> }
 
   const activeCategory = categories.find(c => c.id === selectedCategoryId);
 
+  // Tag-Vorschläge aus ALLEN Kategorien (z.B. für Kisten mit gemischtem Inhalt)
+  const allKnownTags = Array.from(new Set(categories.flatMap(c => c.tags || []))).sort();
+
   const handleSave = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     if (!activeCategory || !workspaceId) {
@@ -223,8 +228,9 @@ export default function EditItem({ params }: { params: Promise<{ id: string }> }
         productUrl, // Shop-Link mit speichern!
         imageUrl: finalImageUrl,
         category: activeCategory.name, 
-        tags: selectedTags, 
+        tags: selectedTags,
         quantity,
+        minQuantity: minQuantity === '' ? null : Number(minQuantity),
         locationId,
         tagX,
         tagY,
@@ -458,8 +464,9 @@ export default function EditItem({ params }: { params: Promise<{ id: string }> }
                     </button>
                   ))}
 
-                  <input 
-                    type="text" 
+                  <input
+                    type="text"
+                    list="edit-all-tags"
                     value={customTagInput}
                     onChange={(e) => setCustomTagInput(e.target.value)}
                     onKeyDown={handleAddCustomTag}
@@ -467,6 +474,9 @@ export default function EditItem({ params }: { params: Promise<{ id: string }> }
                     placeholder="+ Eigenes Tag"
                     className="px-3 py-1.5 rounded-lg text-xs font-bold border border-slate-300 bg-white text-slate-900 placeholder-slate-400 outline-none w-32 focus:border-orange-500"
                   />
+                  <datalist id="edit-all-tags">
+                    {allKnownTags.map(t => <option key={t} value={t} />)}
+                  </datalist>
                 </div>
               </div>
             )}
@@ -496,6 +506,16 @@ export default function EditItem({ params }: { params: Promise<{ id: string }> }
               <div>
                 <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Menge</label>
                 <input type="number" value={quantity} onChange={(e) => setQuantity(Number(e.target.value))} className="w-full p-3 border border-slate-300 rounded-xl bg-white text-slate-900 font-bold" />
+                <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1 mt-3">Mindestbestand (Optional)</label>
+                <input
+                  type="number"
+                  min="0"
+                  value={minQuantity}
+                  onChange={(e) => setMinQuantity(e.target.value)}
+                  placeholder="z.B. 5"
+                  className="w-full p-3 border border-slate-300 rounded-xl bg-white text-slate-900 font-bold placeholder-slate-300"
+                />
+                <p className="text-[9px] text-slate-400 mt-1 leading-snug">Fällt der Bestand darunter, landet das Item automatisch auf der Einkaufsliste.</p>
               </div>
               <div>
                 <label className="block text-[10px] font-bold text-slate-500 uppercase mb-1">Lagerort</label>

@@ -26,7 +26,8 @@ export type BrotherPrinterConfig = {
   labelName: string;   // Tape-Größe, z.B. 'W24' (= 24mm-Tape)
   port: 'BLUETOOTH' | 'NET';
   channelInfo: string; // Bluetooth: MAC-Adresse, NET: IP-Adresse
-  labelLengthMm?: number; // feste Etikettenlänge in mm (Default 60)
+  labelLengthMm?: number; // maximale Etikettenlänge in mm (Default 60)
+  textOnLabel?: boolean;  // false = nur QR-Code drucken (Verleih hat immer Text)
 };
 
 export type FoundPrinter = {
@@ -162,7 +163,7 @@ export async function tryPrintNative(
     await setPrinterAsync(plugin, cfg, copies);
     const lengthMm = cfg.labelLengthMm || DEFAULT_LABEL_LENGTH_MM;
     for (const item of items) {
-      const encodedImage = await renderLabelToPng(item, ownerName, origin, lengthMm);
+      const encodedImage = await renderLabelToPng(item, ownerName, origin, lengthMm, cfg.textOnLabel !== false);
       await printImageAsync(plugin, encodedImage);
     }
   } catch (e) {
@@ -187,7 +188,7 @@ export async function tryPrintLoanNative(
   try {
     await requestBluetoothPermissions();
     await setPrinterAsync(plugin, cfg, 1);
-    const encodedImage = await renderLoanLabelToPng(item, loan, ownerName, origin);
+    const encodedImage = await renderLoanLabelToPng(item, loan, ownerName, origin, cfg.labelLengthMm || 90);
     await printImageAsync(plugin, encodedImage);
   } catch (e) {
     console.error('Brother-Druck fehlgeschlagen:', e);
@@ -213,7 +214,7 @@ export async function tryPrintLocationsNative(
     await setPrinterAsync(plugin, cfg, copies);
     const lengthMm = cfg.labelLengthMm || DEFAULT_LABEL_LENGTH_MM;
     for (const loc of locs) {
-      const encodedImage = await renderLocationLabelToPng(loc, ownerName, origin, lengthMm);
+      const encodedImage = await renderLocationLabelToPng(loc, ownerName, origin, lengthMm, cfg.textOnLabel !== false);
       await printImageAsync(plugin, encodedImage);
     }
   } catch (e) {

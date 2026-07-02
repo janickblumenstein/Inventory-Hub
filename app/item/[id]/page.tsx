@@ -238,7 +238,7 @@ export default function ItemDetail({ params }: { params: Promise<{ id: string }>
   const handlePrintLoan = async (loan: any) => {
     const handled = await tryPrintLoanNative(
       { id: item.id, name: item.name },
-      { borrowerName: loan.borrowerName, quantity: loan.quantity, expectedReturnDate: loan.expectedReturnDate },
+      { borrowerName: loan.borrowerName, quantity: loan.quantity, borrowDate: loan.borrowDate, expectedReturnDate: loan.expectedReturnDate },
       ownerName,
       brotherPrinter,
       window.location.origin

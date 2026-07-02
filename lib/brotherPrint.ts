@@ -71,6 +71,20 @@ export async function requestBluetoothPermissions(): Promise<PermResult> {
   });
 }
 
+// Fordert die Kamera-Berechtigung an (für den Barcode-Scanner in der App).
+export async function requestCameraPermission(): Promise<PermResult> {
+  if (typeof window === 'undefined') return 'unavailable';
+  const perms = (window as any)?.cordova?.plugins?.permissions;
+  if (!perms || typeof perms.requestPermission !== 'function') return 'unavailable';
+  return new Promise((resolve) => {
+    perms.requestPermission(
+      'android.permission.CAMERA',
+      (status: any) => resolve(status?.hasPermission ? 'granted' : 'denied'),
+      () => resolve('denied')
+    );
+  });
+}
+
 // Läuft die App nativ (Android via Capacitor) UND ist das Plugin verfügbar?
 export function isNativePrintAvailable(): boolean {
   try {

@@ -347,18 +347,24 @@ export default function Dashboard() {
     return `${pattern}${encodeURIComponent(item.name || '')}`;
   };
 
-  // 📋 Ganze Einkaufsliste als Text kopieren (für Bring!, WhatsApp etc.)
+  // 📋 Ganze Einkaufsliste teilen (Bring!, WhatsApp …) – sonst kopieren.
   const handleCopyShoppingList = async () => {
     const list = items
       .filter(i => i.onShoppingList)
       .map(i => `${i.quantity || 1}x ${i.name || 'Item'}`)
       .join('\n');
     if (!list) return;
+    if (typeof navigator !== 'undefined' && navigator.share) {
+      try {
+        await navigator.share({ title: 'Einkaufsliste', text: list });
+        return;
+      } catch { /* abgebrochen -> Fallback */ }
+    }
     try {
       await navigator.clipboard.writeText(list);
-      alert(`✅ Einkaufsliste kopiert (${shoppingItemsCount} Positionen).\n\nJetzt einfach in Bring!, WhatsApp o.ä. einfügen.`);
+      alert(`✅ Einkaufsliste kopiert (${shoppingItemsCount} Positionen).\n\nJetzt in Bring!, WhatsApp o.ä. einfügen.`);
     } catch {
-      alert('Kopieren fehlgeschlagen.');
+      alert('Teilen/Kopieren fehlgeschlagen.');
     }
   };
 
@@ -522,7 +528,7 @@ export default function Dashboard() {
             onClick={handleCopyShoppingList}
             className="w-full mb-6 bg-white border border-slate-200 hover:border-orange-300 text-slate-700 font-bold py-3 rounded-xl shadow-sm transition flex items-center justify-center gap-2"
           >
-            📋 Ganze Liste kopieren <span className="text-xs font-normal text-slate-400">(für Bring!, WhatsApp …)</span>
+            📤 Ganze Liste teilen <span className="text-xs font-normal text-slate-400">(Bring!, WhatsApp …)</span>
           </button>
         )}
 

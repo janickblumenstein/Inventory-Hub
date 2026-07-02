@@ -77,7 +77,17 @@ npx cap sync
 Damit fragt die App beim ersten „Drucker suchen" den Android-Dialog ab. Ohne
 dieses Plugin bleibt die Druckersuche leer.
 
-## 3. Bluetooth-Berechtigungen (Android 12+)
+## 2c. Plugin für den Zurück-Button / Wischgeste
+
+Damit die Zurück-Wischgeste nicht die App schließt, sondern im App-Verlauf
+zurücknavigiert:
+
+```bash
+npm install @capacitor/app
+npx cap sync
+```
+
+## 3. Berechtigungen (Android 12+)
 
 In `android/app/src/main/AndroidManifest.xml` innerhalb von `<manifest>`:
 
@@ -87,6 +97,9 @@ In `android/app/src/main/AndroidManifest.xml` innerhalb von `<manifest>`:
 <uses-permission android:name="android.permission.BLUETOOTH" />
 <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" />
 <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+<!-- NEU: Kamera für den Barcode-Scanner -->
+<uses-permission android:name="android.permission.CAMERA" />
+<uses-feature android:name="android.hardware.camera" android:required="false" />
 ```
 
 Diese Rechte werden zur Laufzeit einmal abgefragt.

@@ -8,6 +8,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import type { CategoryConfig } from '../settings/page';
 import { useWorkspace } from '../../context/WorkspaceContext';
+import { requestCameraPermission } from '../../lib/brotherPrint';
 
 // 🛒 DAS SHOP-LEXIKON
 const SUPPORTED_SHOPS: Record<string, { name: string, style: string, urlPattern: string }> = {
@@ -87,6 +88,7 @@ export default function NewItem() {
     let scannerInstance: any = null;
 
     const initScanner = async () => {
+      await requestCameraPermission(); // in der App: Kamera-Recht anfordern
       const { Html5QrcodeScanner } = await import('html5-qrcode');
       scannerInstance = new Html5QrcodeScanner("inline-reader", { fps: 10, qrbox: { width: 250, height: 250 } }, false);
       

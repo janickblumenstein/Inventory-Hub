@@ -258,7 +258,9 @@ export default function NewItem() {
           </Link>
         </div>
         
-        <form onSubmit={handleSubmit} className="space-y-6">
+        {/* noValidate: das URL-Feld ist nur eine optionale Zwischeneingabe und
+            darf das Speichern nie blockieren */}
+        <form onSubmit={handleSubmit} noValidate className="space-y-6">
           
           {/* 🔥 BILD & SHOP-LINK BEREICH */}
           <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-4">

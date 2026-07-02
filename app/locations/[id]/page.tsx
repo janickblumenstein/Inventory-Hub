@@ -670,17 +670,41 @@ export default function LocationHub({ params }: { params: Promise<{ id: string }
                     <label className="text-[10px] font-bold text-slate-500 uppercase">Neues Item an dieser Stelle</label>
                     <input
                       type="text"
-                      list="phototag-suggestions"
                       value={newItemName}
                       onChange={(e) => setNewItemName(e.target.value)}
                       onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); createTaggedItem(); } }}
                       placeholder="Bezeichnung (z.B. Akkuschrauber)"
                       autoFocus
+                      autoComplete="off"
                       className="w-full p-3 border border-slate-300 rounded-xl bg-white text-slate-900 outline-none font-bold text-lg focus:border-orange-500"
                     />
-                    <datalist id="phototag-suggestions">
-                      {allTags.map(t => <option key={t} value={t} />)}
-                    </datalist>
+
+                    {/* Tag-Vorschläge als Chips (eigene Lösung statt nativer
+                        datalist – die klappte beim Autofokus kurz auf und
+                        wieder zu) */}
+                    {newItemName.trim().length >= 1 && (
+                      (() => {
+                        const q = newItemName.trim().toLowerCase();
+                        const suggestions = allTags
+                          .filter(t => t.toLowerCase().includes(q) && t.toLowerCase() !== q)
+                          .slice(0, 8);
+                        if (suggestions.length === 0) return null;
+                        return (
+                          <div className="flex flex-wrap gap-1.5">
+                            {suggestions.map(t => (
+                              <button
+                                key={t}
+                                type="button"
+                                onClick={() => setNewItemName(t)}
+                                className="px-2.5 py-1 rounded-lg text-xs font-bold bg-slate-100 text-slate-600 border border-slate-200 hover:bg-orange-50 hover:border-orange-300 transition"
+                              >
+                                {t}
+                              </button>
+                            ))}
+                          </div>
+                        );
+                      })()
+                    )}
 
                     {/* Kategorie (optional) + Menge direkt beim Erfassen */}
                     <div className="flex items-center gap-2">

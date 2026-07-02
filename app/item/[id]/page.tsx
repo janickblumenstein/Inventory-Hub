@@ -164,6 +164,20 @@ export default function ItemDetail({ params }: { params: Promise<{ id: string }>
     }
   };
 
+  // 📍 Position im Lagerort direkt auf dem Foto setzen (ohne Bearbeiten-Umweg)
+  const handleSetPosition = async (e: React.MouseEvent<HTMLImageElement>) => {
+    if (!item || !workspaceId) return;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = ((e.clientX - rect.left) / rect.width) * 100;
+    const y = ((e.clientY - rect.top) / rect.height) * 100;
+    setItem({ ...item, tagX: x, tagY: y });
+    try {
+      await updateDoc(doc(db, 'workspaces', workspaceId, 'items', item.id), { tagX: x, tagY: y });
+    } catch {
+      alert('Fehler beim Speichern der Position.');
+    }
+  };
+
   // 🟢🔵🟠🔴 Füllstand setzen (Modus 'level'); Knapp/Leer -> Einkaufsliste
   const setStockLevelValue = async (level: StockLevel) => {
     if (!item || !workspaceId) return;
@@ -579,12 +593,14 @@ export default function ItemDetail({ params }: { params: Promise<{ id: string }>
               
               {location && location.imageUrl && (
                 <div className="relative inline-block border-2 border-slate-200 rounded-lg overflow-hidden shadow-sm w-full">
-                  <img 
-                    src={location.imageUrl} 
-                    alt="Lagerort" 
-                    className="w-full h-auto block" 
+                  <img
+                    src={location.imageUrl}
+                    alt="Lagerort"
+                    onClick={handleSetPosition}
+                    className="w-full h-auto block cursor-crosshair"
+                    title="Tippen, um die Position zu setzen"
                   />
-                  
+
                   {item.tagX !== undefined && item.tagY !== undefined && item.tagX !== null && item.tagY !== null && (
                     <div 
                       className="absolute w-5 h-5 bg-red-600 border-2 border-white rounded-full shadow-[0_0_10px_rgba(0,0,0,0.5)] transform -translate-x-1/2 -translate-y-1/2 pointer-events-none"
@@ -594,6 +610,11 @@ export default function ItemDetail({ params }: { params: Promise<{ id: string }>
                     </div>
                   )}
                 </div>
+              )}
+              {location && location.imageUrl && (
+                <p className="text-[10px] text-slate-400 mt-1.5">
+                  {item.tagX != null ? '📍 Tippe aufs Foto, um die Position zu ändern.' : '📍 Tippe aufs Foto, um die Position dieses Items zu markieren.'}
+                </p>
               )}
             </div>
 

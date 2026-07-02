@@ -5,12 +5,14 @@ import { db, storage } from '../../lib/firebase';
 import { collection, addDoc, getDocs, doc, deleteDoc, query, orderBy, getDoc } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import QRCode from 'react-qr-code';
 import { useWorkspace } from '../../context/WorkspaceContext';
 import { tryPrintLocationsNative } from '../../lib/brotherPrint';
 import { buildLocationLabelUrl } from '../../lib/labelImage';
 
 export default function LocationsManager() {
+  const router = useRouter();
   const { workspaceId } = useWorkspace();
   const [printLoc, setPrintLoc] = useState<any>(null); 
   const [locations, setLocations] = useState<any[]>([]);
@@ -86,19 +88,16 @@ export default function LocationsManager() {
 
       const finalCode = locCode.trim() || generateRandomCode();
 
-      await addDoc(collection(db, 'workspaces', workspaceId, 'locations'), {
+      const docRef = await addDoc(collection(db, 'workspaces', workspaceId, 'locations'), {
         name: newName.trim(),
         parentId: parentLocId || null,
-        code: finalCode, 
-        imageUrl: imageUrl, 
+        code: finalCode,
+        imageUrl: imageUrl,
         createdAt: new Date().toISOString()
       });
-      
-      setNewName('');
-      setParentLocId('');
-      setLocCode('');
-      setImageFile(null);
-      fetchLocations();
+
+      // Direkt in den neuen Ort – dort will man meist gleich Items erfassen.
+      router.push(`/locations/${docRef.id}`);
     } catch (e) {
       alert("Fehler beim Speichern");
     } finally {

@@ -60,15 +60,16 @@ export default function NewLocation() {
         finalImageUrl = await getDownloadURL(imageRef);
       }
 
-      await addDoc(collection(db, 'workspaces', workspaceId, 'locations'), {
+      const docRef = await addDoc(collection(db, 'workspaces', workspaceId, 'locations'), {
         name,
-        parentId: parentId || null, 
+        parentId: parentId || null,
         imageUrl: finalImageUrl,
-        qrCodeId: '', 
+        qrCodeId: '',
         createdAt: serverTimestamp()
       });
-      
-      router.push('/'); 
+
+      // Direkt in den neuen Ort – dort will man meist gleich Items erfassen.
+      router.push(`/locations/${docRef.id}`);
       
     } catch (error) {
       console.error("Fehler: ", error);

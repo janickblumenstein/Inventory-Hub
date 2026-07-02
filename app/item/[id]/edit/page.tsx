@@ -204,6 +204,10 @@ export default function EditItem({ params }: { params: Promise<{ id: string }> }
 
   const handleSave = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    if (!name.trim()) {
+      alert("Bitte gib eine Bezeichnung ein!");
+      return;
+    }
     if (!activeCategory || !workspaceId) {
       alert("Bitte wähle eine Haupt-Kategorie aus!");
       return;
@@ -302,7 +306,9 @@ export default function EditItem({ params }: { params: Promise<{ id: string }> }
           </div>
         </div>
         
-        <form onSubmit={handleSave} className="space-y-6">
+        {/* noValidate: das URL-Feld ist nur eine optionale Zwischeneingabe und
+            darf das Speichern nie blockieren */}
+        <form onSubmit={handleSave} noValidate className="space-y-6">
           
           {/* 🔥 NEU: BILD & SHOP-LINK BEREICH */}
           <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-4">

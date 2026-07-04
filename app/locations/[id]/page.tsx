@@ -509,13 +509,15 @@ export default function LocationHub({ params }: { params: Promise<{ id: string }
               </button>
             </div>
 
-            <div className="flex-1 p-2 md:p-8 flex items-center justify-center min-h-0 relative">
-              {/* Dieser Container umarmt das Bild exakt, damit die Prozente stimmen */}
-              <div className="relative inline-block" style={{ maxWidth: '100%', maxHeight: '100%' }}>
-                <img 
-                  src={location.imageUrl} 
-                  alt="Lagerort" 
-                  className="block max-w-full max-h-full cursor-crosshair border-2 border-slate-800 rounded-lg shadow-2xl" 
+            <div className="flex-1 p-2 md:p-8 flex items-center justify-center min-h-0 relative overflow-hidden">
+              {/* Dieser Container umarmt das Bild exakt, damit die Prozente
+                  stimmen. Rahmen am Wrapper (nicht am Bild) -> kein Versatz
+                  der Tipp-Position; Höhe hart über dvh begrenzt. */}
+              <div className="relative inline-block border-2 border-slate-800 rounded-lg overflow-hidden shadow-2xl" style={{ maxWidth: '100%' }}>
+                <img
+                  src={location.imageUrl}
+                  alt="Lagerort"
+                  className="block max-w-full cursor-crosshair max-h-[52dvh] md:max-h-[78dvh]"
                   onClick={handlePlaceMarker}
                   draggable={false}
                 />
@@ -632,15 +634,22 @@ export default function LocationHub({ params }: { params: Promise<{ id: string }
             </div>
           ) : (
             <>
-              {/* Bild-Bereich (Tippen platziert einen neuen Marker) */}
-              <div className="flex-1 p-2 md:p-6 flex items-center justify-center min-h-0 relative">
-                <div className="relative inline-block" style={{ maxWidth: '100%', maxHeight: '100%' }}>
+              {/* Bild-Bereich (Tippen platziert einen neuen Marker).
+                  Höhe hart über dvh begrenzt: max-h-full griff hier nicht
+                  (Wrapper ohne definierte Höhe) -> Bild wurde zu groß und
+                  verdeckte das Eingabefeld. dvh schrumpft zudem mit, wenn
+                  die Tastatur aufgeht. Der Rahmen sitzt am Wrapper, nicht am
+                  Bild, damit die Tipp-Position nicht um die Rahmenbreite
+                  versetzt ist. */}
+              <div className="flex-1 p-2 md:p-6 flex items-center justify-center min-h-0 relative overflow-hidden">
+                <div className="relative inline-block border-2 border-slate-800 rounded-lg overflow-hidden shadow-2xl" style={{ maxWidth: '100%' }}>
                   <img
                     src={location.imageUrl}
                     alt="Ort"
                     onClick={handlePhotoTaggingTap}
                     draggable={false}
-                    className="block max-w-full max-h-full cursor-crosshair border-2 border-slate-800 rounded-lg shadow-2xl"
+                    className="block max-w-full cursor-crosshair"
+                    style={{ maxHeight: pendingTag ? '38dvh' : '62dvh' }}
                   />
 
                   {itemsInLocation.map(item => {
@@ -663,8 +672,9 @@ export default function LocationHub({ params }: { params: Promise<{ id: string }
                 </div>
               </div>
 
-              {/* Bottom Sheet: Schnell-Eingabe */}
-              <div className="bg-white flex-shrink-0 p-4 pb-8 shadow-[0_-10px_30px_rgba(0,0,0,0.5)]">
+              {/* Bottom Sheet: Schnell-Eingabe (scrollt notfalls selbst,
+                  statt vom Bild verdeckt zu werden) */}
+              <div className="bg-white flex-shrink-0 p-4 pb-8 shadow-[0_-10px_30px_rgba(0,0,0,0.5)] max-h-[55dvh] overflow-y-auto">
                 {pendingTag ? (
                   <div className="space-y-3 animate-fade-in">
                     <label className="text-[10px] font-bold text-slate-500 uppercase">Neues Item an dieser Stelle</label>
